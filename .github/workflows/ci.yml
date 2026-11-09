@@ -1,6 +1,7 @@
 name: Verify Cantabile
 on:
   push:
+    branches: [main]
   pull_request:
   workflow_dispatch:
 permissions:
@@ -87,7 +88,7 @@ jobs:
           python3 examples/create_demo.py "$RUNNER_TEMP/cantabile-audio/demo.json"
           docker run --rm --network none --mount "type=bind,source=$RUNNER_TEMP/cantabile-audio,target=/work" --entrypoint /app/cantabile-cli cantabile:ci export-midi /work/demo.json /work/demo.mid
           docker run --rm --network none --mount "type=bind,source=$RUNNER_TEMP/cantabile-audio,target=/work" --mount type=bind,source=/usr/share/sounds/sf2,target=/soundfonts,readonly --entrypoint /app/cantabile-render cantabile:ci --midi /work/demo.mid --soundfont /soundfonts/TimGM6mb.sf2 --output /work/demo.wav
-          python3 -c 'import os,wave; w=wave.open(os.environ["RUNNER_TEMP"]+"/cantabile-audio/demo.wav"); assert w.getnchannels()==2 and w.getnframes()>48000'
+          docker run --rm --network none --mount "type=bind,source=$RUNNER_TEMP/cantabile-audio,target=/work,readonly" --entrypoint python3 cantabile:ci -c 'import wave; w=wave.open("/work/demo.wav"); assert w.getnchannels()==2 and w.getnframes()>48000'
       - name: Validate the actual image archive and candidate catalog
         run: |
           docker save -o "$RUNNER_TEMP/image.tar" cantabile:ci
