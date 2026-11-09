@@ -1,0 +1,77 @@
+name: Publish Cantabile preview
+on:
+  workflow_run:
+    workflows: [Verify Cantabile]
+    types: [completed]
+    branches: [main]
+permissions:
+  contents: read
+concurrency:
+  group: cantabile-release
+  cancel-in-progress: false
+jobs:
+  publish:
+    if: >-
+      github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.event == 'push' &&
+      github.event.workflow_run.head_repository.full_name == github.repository
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
+          persist-credentials: false
+      - name: Select the verified version
+        id: version
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          VERSION=$(python3 -c 'import json; print(json.load(open("release/updater.json"))["version"])')
+          [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          echo "tag=v$VERSION" >> "$GITHUB_OUTPUT"
+          if gh release view "v$VERSION" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo 'exists=true' >> "$GITHUB_OUTPUT"
+          else
+            echo 'exists=false' >> "$GITHUB_OUTPUT"
+          fi
+      - name: Build the verified Linux image
+        if: steps.version.outputs.exists == 'false'
+        env:
+          SOURCE_REVISION: ${{ github.event.workflow_run.head_sha }}
+        run: docker build -f packaging/Dockerfile --build-arg SOURCE_REVISION="$SOURCE_REVISION" -t cantabile:release .
+      - name: Verify packaged tools and real offline synthesis
+        if: steps.version.outputs.exists == 'false'
+        run: |
+          sudo apt-get update && sudo apt-get install -y timgm6mb-soundfont
+          docker run --rm --network none --entrypoint /app/cantabile-host cantabile:release catalog --workspace /tmp/catalog > "$RUNNER_TEMP/tools.json"
+          python3 packaging/make_hub_catalog.py --tools "$RUNNER_TEMP/tools.json" --output "$RUNNER_TEMP/cantabile-hub.json"
+          python3 -c 'import json; assert json.load(open("config/mcps/_cantabile.example.json")) == json.load(open(__import__("os").environ["RUNNER_TEMP"]+"/cantabile-hub.json"))'
+          mkdir "$RUNNER_TEMP/audio"
+          chmod 777 "$RUNNER_TEMP/audio"
+          python3 examples/create_demo.py "$RUNNER_TEMP/audio/demo.json"
+          docker run --rm --network none --mount "type=bind,source=$RUNNER_TEMP/audio,target=/work" --entrypoint /app/cantabile-cli cantabile:release export-midi /work/demo.json /work/demo.mid
+          docker run --rm --network none --mount "type=bind,source=$RUNNER_TEMP/audio,target=/work" --mount type=bind,source=/usr/share/sounds/sf2,target=/soundfonts,readonly --entrypoint /app/cantabile-render cantabile:release --midi /work/demo.mid --soundfont /soundfonts/TimGM6mb.sf2 --output /work/demo.wav
+          docker run --rm --network none --mount "type=bind,source=$RUNNER_TEMP/audio,target=/work,readonly" --entrypoint python3 cantabile:release -c 'import wave; w=wave.open("/work/demo.wav"); assert w.getnchannels()==2 and w.getnframes()>48000'
+      - name: Bind catalog to the actual image and source
+        if: steps.version.outputs.exists == 'false'
+        env:
+          SOURCE_REVISION: ${{ github.event.workflow_run.head_sha }}
+        run: |
+          docker save -o "$RUNNER_TEMP/image.tar" cantabile:release
+          IMAGE_ID=$(docker image inspect cantabile:release --format '{{.Id}}')
+          python3 packaging/package_updater.py --image "$RUNNER_TEMP/image.tar" --image-id "$IMAGE_ID" --revision "$SOURCE_REVISION" --output "$RUNNER_TEMP/distribution"
+          cp "$RUNNER_TEMP/cantabile-hub.json" "$RUNNER_TEMP/distribution/cantabile-hub.json"
+          cp LICENSE THIRD_PARTY.md "$RUNNER_TEMP/distribution/"
+          python3 -c 'import json,os,pathlib; p=pathlib.Path(os.environ["RUNNER_TEMP"])/"distribution"; d=json.loads((p/"candidate.json").read_text()); (p/"release-notes.md").write_text("First Cantabile preview: native MIDI editing, 18 MCP tools, project persistence, SMF import/export and offline FluidSynth WAV rendering.\n\nVST hosting and the Windows GUI are pending. Live deployment/Hub attachment and Cubase acceptance are separate checks. SoundFonts are supplied separately.\n\nVerified source: `"+d["source_revision"]+"`\nImage: `"+d["image_id"]+"`\n")'
+      - name: Publish immutable preview assets
+        if: steps.version.outputs.exists == 'false'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ steps.version.outputs.tag }}
+          SOURCE_REVISION: ${{ github.event.workflow_run.head_sha }}
+        run: |
+          gh release create "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --target "$SOURCE_REVISION" --draft --prerelease --title "Cantabile $RELEASE_TAG preview" --notes-file "$RUNNER_TEMP/distribution/release-notes.md" "$RUNNER_TEMP/distribution/catalog.json" "$RUNNER_TEMP/distribution/candidate.json" "$RUNNER_TEMP/distribution/linux-amd64--image.tar" "$RUNNER_TEMP/distribution/cantabile-hub.json" "$RUNNER_TEMP/distribution/LICENSE" "$RUNNER_TEMP/distribution/THIRD_PARTY.md"
+          gh release edit "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --draft=false

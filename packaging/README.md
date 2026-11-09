@@ -1,8 +1,13 @@
 # Docker / Updater packaging candidate
 
 The application owns its Docker image, immutable archive, release metadata and
-Updater recipe. This source does **not** publish a release, register a catalog,
-install anything on a deployment host, or prove a real Docker/Updater rollout.
+Updater recipe. The release workflow publishes a preview only after successful main-branch CI,
+then builds and smoke-tests the exact verified revision again. It uploads the
+image archive, digested catalog, image/source receipt, Hub descriptor and license
+notices through a draft release. Existing releases are never overwritten.
+Publication does not register a catalog, install on a deployment host, or prove
+a real Docker/Updater rollout. Updater platform metadata uses `linux/amd64`;
+asset filenames use `linux-amd64--image.tar`.
 
 ## Build and prepare
 
@@ -79,5 +84,5 @@ systemd application service is installed by this repository.
 
 The package-generator tests use Docker-save-shaped fixtures and verify digest
 identity, persistence mounts, private settings and refusal to overwrite output.
-They do not replace a real image build/install/update acceptance test. Local
-Docker execution and real Updater/Hub deployment remain pending.
+They do not replace a real image build/install/update acceptance test. GitHub CI has passed actual Docker build, packaged host discovery and offline
+WAV synthesis. Real Updater/Hub deployment remains a separate acceptance gate.
