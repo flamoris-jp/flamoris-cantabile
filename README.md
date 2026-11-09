@@ -1,73 +1,71 @@
-# FLAMORIS Repository Template
+# FLAMORIS Cantabile 🎹
 
-Standard repository template for FLAMORIS projects.
+Headless MIDI composition and export for humans and AI.
 
-Use this repository as the starting point for new FLAMORIS repositories. After creating a repository from this template, replace the placeholders in this README with project-specific information and add only the language, runtime, build, and deployment files the project actually needs.
+画面なしで曲を組み立て、標準MIDIとしてDAWへ渡すためのFLAMORIS作曲ツールです。
 
 ## Project
 
-**Name:** `<PROJECT_NAME>`
+**Name:** `flamoris-cantabile`
 
-**Description:** `<PROJECT_DESCRIPTION>`
+**Description:** Headless MIDI composition and export tool for DAW workflows, with planned CLI/MCP editing.
 
-**Status:** `<planned | development | stable | meta>`
-
-For repositories in `flamoris-jp`, keep this wording aligned with the organization `development_status` custom property. State implemented behavior separately from planned work. Do not leave a repository looking like a future design after its runtime or product slice has already shipped.
+**Status:** `planned` — repository initialized; application implementation has not started.
 
 ## 🧭 Repository identity / このRepositoryは何者？
 
-Replace the placeholders below with short, project-specific statements. Keep them near the top so a human or AI assistant can understand the repository before digging through Issues or source code.
-
 ### What it is / 何者か
 
-`<ONE_OR_TWO_SENTENCE_PROJECT_IDENTITY>`
+Cantabile is a planned Linux-first tool for editing structured music projects and exporting Standard MIDI Files. The first workflow is to create MIDI without a GUI, then import it into Cubase for instrument assignment, playback, mixing, and audio export.
+
+最初はLinux上のCLIからメロディー・コード・ベース・ドラムなどを作り、MIDIを書き出します。Cubaseへの受け渡しを最初の制作経路とし、GUIは初期実装に含めません。
 
 ### What it owns / 主な責任範囲
 
-- `<PRIMARY_RESPONSIBILITY_OR_AUTHORITY>`
-- `<SECONDARY_RESPONSIBILITY_IF_NEEDED>`
+- Editable music-project data: tracks, phrases, notes, tempo, meter, and optional note-to-lyric associations.
+- Project validation, save/load, and deterministic MIDI export.
+- A future MCP adapter that operates the same project/editing core as the CLI.
+
+曲の編集データとMIDI書き出しの正本は、このRepositoryが所有します。内部プロジェクトを保存し、フレーズや小節単位で修正できる設計を目指します。
 
 ### What it does not own / 持たない責任
 
-- `<IMPORTANT_NEIGHBORING_RESPONSIBILITY_OWNED_ELSEWHERE>`
+- Cubase project state, instrument libraries, VST hosting, mixing, and final audio rendering.
+- Synthesizer V's singing engine, voice databases, licensing, or native editing state.
+- Kachinco's video timeline or media-export engine.
+- Shared MCP transport, authentication, logging, or host lifecycle already owned by FLAMORIS infrastructure.
 
-Delete this subsection only when there is genuinely no likely ownership confusion.
+Cubaseは演奏・音作り・ミックス・音声書き出しを担当します。歌声制作ではSynthesizer V 2などの専用ソフトへメロディーを渡す方針で、歌詞・発音の自動連携は後続の検討事項です。
 
 ### Current status / 現在の状態
 
-`<WHAT_IS_IMPLEMENTED_NOW_AND_WHAT_IS_STILL_PLANNED_OR_UNACCEPTED>`
+This repository was created from the FLAMORIS repository template. It currently contains project documentation and the shared contribution, security, licensing, and agent instructions.
 
-Do not describe planned behavior as shipped, or implemented behavior as merely future design.
+CLI, project persistence, MIDI export, MCP integration, Cubase import acceptance, and singing-synthesis handoff are **not implemented or verified yet**. No runtime, deployment, or service setup is claimed.
+
+現在はRepository初期化・方針整理の段階です。最初の到達点は「画面なしで曲データを作り、書き出したMIDIをCubaseへ取り込めること」です。
 
 ### Where it fits / FLAMORISのどこに属する？
 
-Start from the [FLAMORIS organization map](https://github.com/flamoris-jp/.github).
+- [FLAMORIS organization map](https://github.com/flamoris-jp/.github)
+- [FLAMORIS AI Ecosystem](https://github.com/flamoris-jp/flamoris-ai/blob/main/docs/ai-ecosystem.md)
+- [FLAMORIS Repository Policy](https://github.com/flamoris-jp/flamoris-commons/blob/main/docs/repository-policy.md)
+- [Kachinco](https://github.com/flamoris-jp/flamoris-kachinco): a reference for the product-owned editing core and headless workflow; Cantabile owns music composition separately.
 
-When relevant, also link the appropriate family map:
+## First workflow / 最初の制作フロー
 
-- 🎨 Windows / Desktop: [FLAMORIS Desktop Ecosystem](https://github.com/flamoris-jp/flamoris-commons/blob/main/docs/desktop-ecosystem.md)
-- 🤖 AI / MCP services: [FLAMORIS AI Ecosystem](https://github.com/flamoris-jp/flamoris-ai/blob/main/docs/ai-ecosystem.md)
+1. Edit and save a structured music project through the CLI.
+2. Export a multi-track Standard MIDI File (`.mid`).
+3. Import the MIDI file into Cubase and assign instruments.
+4. Play, refine, mix, and export audio in the DAW.
 
-The shared repository documentation policy lives in [FLAMORIS Commons](https://github.com/flamoris-jp/flamoris-commons/blob/main/docs/repository-policy.md).
-
-## 🏷️ GitHub metadata checklist / GitHub表示設定
-
-After creating a repository from this template, configure the GitHub repository metadata as well as the files.
-
-- **Description:** one concise sentence describing the repository's current role.
-- **Topics:** include `flamoris`, then add a small set of useful project/domain/technology topics. Prefer roughly 4–7 intentional topics over filling every slot.
-- **Development status:** set the organization `development_status` custom property and keep it aligned with this README.
-- **Visibility:** choose intentionally; do not expose deployment secrets, private topology, credentials, or private assets by making a repository public.
-
-Do not use obsolete or speculative Topics to advertise responsibilities the repository does not actually own.
-
-> GitHub repository metadata is not repository file content. When creating from a template, verify these settings explicitly rather than assuming every template setting was inherited. 🐾
+MIDI files carry performance and timing data; instrument sounds and rendered audio remain with the receiving application. Optional vocal-melody export can later feed Synthesizer V 2. Automatic lyric/phoneme transfer requires a separate verified integration.
 
 ## Getting started
 
-Document the real setup, build, test, and run commands for this repository here.
+Implementation has not started, so there are no installation, build, or execution commands yet. See the [initial roadmap](docs/ROADMAP.md) for the intended first slice and acceptance criteria.
 
-Do not copy commands from another FLAMORIS project unless they have been verified against the current implementation.
+The implementation language, dependencies, project-file extension, and exact CLI/MCP commands will be selected and documented with the first implementation.
 
 ## Repository principles
 
