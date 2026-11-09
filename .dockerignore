@@ -1,0 +1,12 @@
+.git
+build*
+host/bin
+host/obj
+**/__pycache__
+**/*.pyc
+.venv
+artifacts
+*.wav
+*.sf2
+*.mid
+.env*

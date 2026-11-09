@@ -25,3 +25,13 @@ temp/
 .cache/
 
 # Language- and runtime-specific ignores belong in each generated repository.
+build*/
+host/bin/
+host/obj/
+__pycache__/
+*.pyc
+artifacts/
+*.wav
+*.sf2
+image.tar
+candidate-*/

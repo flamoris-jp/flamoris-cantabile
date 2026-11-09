@@ -1,6 +1,6 @@
 # Cantabile design proposal / 設計案
 
-Status: `planned`. This is a product/design proposal, not an implementation or deployment receipt.
+This document describes the target design. See [README](../README.md) and [acceptance evidence](ACCEPTANCE.md) for the first implementation candidate. VST 3 hosting, Windows GUI, deployment and client listening remain unfinished gates.
 
 ## 1. Product goals / 目指す形
 
