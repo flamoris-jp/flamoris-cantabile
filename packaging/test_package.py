@@ -35,6 +35,7 @@ class PackageTests(unittest.TestCase):
         recipe = packager.package(self.image, self.image_id, 'a' * 40, out)
         catalog = json.loads((out / 'catalog.json').read_text())
         self.assertEqual(catalog['recipes'], [recipe])
+        self.assertEqual(recipe['platform'], 'linux/amd64')
         app = recipe['application']
         self.assertEqual(app['kind'], 'docker')
         self.assertEqual(app['image_id'], self.image_id)
