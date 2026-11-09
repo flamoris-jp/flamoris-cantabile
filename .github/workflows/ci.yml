@@ -1,0 +1,96 @@
+name: Verify Cantabile
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  native:
+    strategy:
+      matrix:
+        os: [ubuntu-24.04, windows-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Independent MIDI parser and JSON headers
+        run: python -m pip install nlohmann_json==3.12.0 mido==1.3.3
+      - name: Configure
+        shell: bash
+        run: |
+          JSON_HEADERS=$(python -c 'import nlohmann_json; print(nlohmann_json.get_include())')
+          cmake -S . -B build -DJSON_INCLUDE_DIR="$JSON_HEADERS" -DCMAKE_BUILD_TYPE=Release
+      - name: Build
+        run: cmake --build build --config Release --parallel 2
+      - name: Native tests
+        run: ctest --test-dir build -C Release --output-on-failure
+      - name: Independent MIDI interoperability and ABI tests
+        run: python -m unittest discover -s tests -v
+      - name: Install audio test prerequisites
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y libfluidsynth3 timgm6mb-soundfont
+      - name: Real offline synthesis tests
+        if: runner.os == 'Linux'
+        run: python -m unittest discover -s audio/tests -v
+      - name: Verify distribution metadata
+        if: runner.os == 'Linux'
+        run: python -m unittest discover -s packaging -p 'test_*.py' -v
+  host:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: sudo apt-get update && sudo apt-get install -y cmake g++ nlohmann-json3-dev libfluidsynth3 timgm6mb-soundfont
+      - run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+      - run: cmake --build build --parallel 2
+      - run: dotnet build host/Flamoris.Cantabile.Host.csproj -c Release
+      - name: MCP and workspace integration tests
+        env:
+          CANTABILE_CORE_LIBRARY: ${{ github.workspace }}/build/libcantabile_core.so
+          CANTABILE_RENDERER: ${{ github.workspace }}/build/audio/cantabile-render
+          CANTABILE_SOUNDFONT: /usr/share/sounds/sf2/TimGM6mb.sf2
+        run: python -m unittest discover -s host/tests -v
+      - name: Static Hub catalog matches the actual host
+        env:
+          CANTABILE_CORE_LIBRARY: ${{ github.workspace }}/build/libcantabile_core.so
+        run: |
+          dotnet host/bin/Release/net10.0/cantabile-host.dll catalog --workspace /tmp/catalog-workspace > /tmp/cantabile-tools.json
+          python packaging/make_hub_catalog.py --tools /tmp/cantabile-tools.json --output /tmp/cantabile-hub.json
+          python -c 'import json; assert json.load(open("/tmp/cantabile-hub.json")) == json.load(open("config/mcps/_cantabile.example.json"))'
+  docker:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build the real image
+        run: docker build -f packaging/Dockerfile --build-arg SOURCE_REVISION="$GITHUB_SHA" -t cantabile:ci .
+      - name: Verify packaged native and managed hosts without network or display
+        run: |
+          docker run --rm --network none --entrypoint /app/cantabile-cli cantabile:ci --version
+          docker run --rm --network none --entrypoint /app/cantabile-host cantabile:ci catalog --workspace /tmp/catalog > /tmp/packaged-tools.json
+          python3 -c 'import json; assert len(json.load(open("/tmp/packaged-tools.json"))) == 18'
+      - name: Verify actual packaged offline synthesis
+        run: |
+          sudo apt-get update && sudo apt-get install -y timgm6mb-soundfont
+          mkdir "$RUNNER_TEMP/cantabile-audio"
+          chmod 777 "$RUNNER_TEMP/cantabile-audio"
+          python3 examples/create_demo.py "$RUNNER_TEMP/cantabile-audio/demo.json"
+          docker run --rm --network none --mount "type=bind,source=$RUNNER_TEMP/cantabile-audio,target=/work" --entrypoint /app/cantabile-cli cantabile:ci export-midi /work/demo.json /work/demo.mid
+          docker run --rm --network none --mount "type=bind,source=$RUNNER_TEMP/cantabile-audio,target=/work" --mount type=bind,source=/usr/share/sounds/sf2,target=/soundfonts,readonly --entrypoint /app/cantabile-render cantabile:ci --midi /work/demo.mid --soundfont /soundfonts/TimGM6mb.sf2 --output /work/demo.wav
+          docker run --rm --network none --mount "type=bind,source=$RUNNER_TEMP/cantabile-audio,target=/work,readonly" --entrypoint python3 cantabile:ci -c 'import wave; w=wave.open("/work/demo.wav"); assert w.getnchannels()==2 and w.getnframes()>48000'
+      - name: Validate the actual image archive and candidate catalog
+        run: |
+          docker save -o "$RUNNER_TEMP/image.tar" cantabile:ci
+          IMAGE_ID=$(docker image inspect cantabile:ci --format '{{.Id}}')
+          python3 packaging/package_updater.py --image "$RUNNER_TEMP/image.tar" --image-id "$IMAGE_ID" --revision "$GITHUB_SHA" --output "$RUNNER_TEMP/cantabile-candidate"

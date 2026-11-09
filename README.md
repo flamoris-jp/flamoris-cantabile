@@ -1,71 +1,87 @@
 # FLAMORIS Cantabile 🎹
 
-Headless MIDI composition and export for humans and AI.
+**Headless MIDI editing and offline audio rendering with a shared C++ engine.**
 
-画面なしで曲を組み立て、標準MIDIとしてDAWへ渡すためのFLAMORIS作曲ツールです。
+画面なしでMIDIを編集し、音楽を書き出すFLAMORIS音楽制作ツールです。将来のWindows GUIも同じ編集エンジンを利用します。
 
-## Project
+**Status: development — first implementation candidate (0.1.0), under review.** No published release, deployed service, real Hub/Updater acceptance, or Windows GUI is claimed.
 
-**Name:** `flamoris-cantabile`
+## What it is / 何者か
 
-**Description:** Headless MIDI composition and export tool for DAW workflows, with planned CLI/MCP editing.
+Cantabile owns its music project, native typed edits and Undo/Redo, MIDI import/export, project persistence, and offline render jobs. CLI and MCP operate the same C++20 core through a small C ABI. The .NET 10 host reuses FLAMORIS MCP Core and Logging.
 
-**Status:** `planned` — repository initialized; application implementation has not started.
+曲データと編集履歴の正本はCantabileが持ちます。MCP Hubは接続集約、Updaterは配布・更新を担当します。CubaseのプロジェクトやSynthesizer Vの歌声エンジンは、それぞれのアプリが所有します。
 
-## 🧭 Repository identity / このRepositoryは何者？
+## Implemented source / 今回の実装
 
-### What it is / 何者か
+| Area | First implementation |
+| --- | --- |
+| Native core | C++20, stable IDs, integer ticks, atomic edits, revision conflicts, Undo/Redo |
+| Editing | Tracks/events, notes, CC/program/pitch/pressure, meta/lyrics/markers/SysEx; transpose and quantize |
+| MIDI | SMF Type 0/1, PPQ, running status import, event ordering and opaque payload preservation |
+| Files | JSON project save/load; MCP workspace operations and bounded artifact transfer with digests |
+| MCP | Shared FLAMORIS permissions/guards and WSS provider; official SDK stdio; one editing authority |
+| Audio | Real offline FluidSynth + separately installed SoundFont; stereo PCM16 WAV, cancellation, result retrieval |
+| Distribution | Nonroot Dockerfile, Updater candidate generator, image/source/digest checks, retained data layout |
 
-Cantabile is a planned Linux-first tool for editing structured music projects and exporting Standard MIDI Files. The first workflow is to create MIDI without a GUI, then import it into Cubase for instrument assignment, playback, mixing, and audio export.
+### Supported boundary / 対応範囲
 
-最初はLinux上のCLIからメロディー・コード・ベース・ドラムなどを作り、MIDIを書き出します。Cubaseへの受け渡しを最初の制作経路とし、GUIは初期実装に含めません。
+Imported note-on/off messages remain raw events to preserve overlaps, unmatched notes and release values. Composed notes support pitch/duration/velocity edits. RPN/NRPN/14-bit controllers are preserved as their underlying events. See the [exact MIDI and ABI contract](docs/PROTOCOL.md).
 
-### What it owns / 主な責任範囲
+Type 2, SMPTE timing, extended/unknown chunks and malformed input fail explicitly. History is bounded and session-local; project saves do not persist Undo history.
 
-- Editable music-project data: tracks, phrases, notes, tempo, meter, and optional note-to-lyric associations.
-- Project validation, save/load, and deterministic MIDI export.
-- A future MCP adapter that operates the same project/editing core as the CLI.
+The first audio backend uses a configured SoundFont and MIDI bank/program events. **VST 3 hosting, plugin presets, phrase arrangement, range/stem rendering and the Windows GUI remain pending.** Unsupported instrument settings fail instead of being silently substituted.
 
-曲の編集データとMIDI書き出しの正本は、このRepositoryが所有します。内部プロジェクトを保存し、フレーズや小節単位で修正できる設計を目指します。
+Audio creation and complete-byte retrieval are testable independently. Native audio presentation and actual model listening require client acceptance; a WAV file alone does not establish that the AI heard it.
 
-### What it does not own / 持たない責任
+## Build and try / 画面なしで試す
 
-- Cubase project state, instrument libraries, VST hosting, mixing, and final audio rendering.
-- Synthesizer V's singing engine, voice databases, licensing, or native editing state.
-- Kachinco's video timeline or media-export engine.
-- Shared MCP transport, authentication, logging, or host lifecycle already owned by FLAMORIS infrastructure.
+Prerequisites: CMake 3.20+, C++20 compiler, nlohmann/json 3.11+ headers, Python 3.12 for examples/tests. The MCP host also needs the .NET SDK selected by global.json.
 
-Cubaseは演奏・音作り・ミックス・音声書き出しを担当します。歌声制作ではSynthesizer V 2などの専用ソフトへメロディーを渡す方針で、歌詞・発音の自動連携は後続の検討事項です。
+~~~bash
+cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+cmake --build build --config Release --parallel 2
+ctest --test-dir build --output-on-failure -C Release
+~~~
 
-### Current status / 現在の状態
+If JSON headers have no CMake package, add -DJSON_INCLUDE_DIR=/path/to/include. Windows uses the same CMake project; Windows runtime acceptance remains pending.
 
-This repository was created from the FLAMORIS repository template. It currently contains project documentation and the shared contribution, security, licensing, and agent instructions.
+Create an original eight-bar project in a new file, then export MIDI:
 
-CLI, project persistence, MIDI export, MCP integration, Cubase import acceptance, and singing-synthesis handoff are **not implemented or verified yet**. No runtime, deployment, or service setup is claimed.
+~~~bash
+python3 examples/create_demo.py /tmp/first-song.cantabile.json
+build/cantabile-cli validate /tmp/first-song.cantabile.json
+build/cantabile-cli export-midi /tmp/first-song.cantabile.json /tmp/first-song.mid
+~~~
 
-現在はRepository初期化・方針整理の段階です。最初の到達点は「画面なしで曲データを作り、書き出したMIDIをCubaseへ取り込めること」です。
+Import the MIDI into Cubase and assign instruments. MIDI does not contain a complete arbitrary VST preset; native project/audio settings and external DAW state remain separate.
 
-### Where it fits / FLAMORISのどこに属する？
+With a separately installed FluidSynth runtime and licensed SoundFont:
 
-- [FLAMORIS organization map](https://github.com/flamoris-jp/.github)
-- [FLAMORIS AI Ecosystem](https://github.com/flamoris-jp/flamoris-ai/blob/main/docs/ai-ecosystem.md)
-- [FLAMORIS Repository Policy](https://github.com/flamoris-jp/flamoris-commons/blob/main/docs/repository-policy.md)
-- [Kachinco](https://github.com/flamoris-jp/flamoris-kachinco): a reference for the product-owned editing core and headless workflow; Cantabile owns music composition separately.
+~~~bash
+build/audio/cantabile-render --midi /tmp/first-song.mid --soundfont /path/to/bank.sf2 --output /tmp/first-song.wav
+~~~
 
-## First workflow / 最初の制作フロー
+The WAV path must be new. No display server, sound card, GPU or model API is used.
 
-1. Edit and save a structured music project through the CLI.
-2. Export a multi-track Standard MIDI File (`.mid`).
-3. Import the MIDI file into Cubase and assign instruments.
-4. Play, refine, mix, and export audio in the DAW.
+## MCP / Docker / Updater
 
-MIDI files carry performance and timing data; instrument sounds and rendered audio remain with the receiving application. Optional vocal-melody export can later feed Synthesizer V 2. Automatic lyric/phoneme transfer requires a separate verified integration.
+- [Native ABI, commands, MIDI scope and limits](docs/PROTOCOL.md)
+- [MCP host setup and tools](host/README.md)
+- [Renderer and audio tests](audio/README.md)
+- [Docker and Updater packaging candidate](packaging/README.md)
+- [Acceptance evidence](docs/ACCEPTANCE.md)
+- [Remaining roadmap](docs/ROADMAP.md)
+- [Target design](docs/DESIGN.md)
+- [Dependency licensing](THIRD_PARTY.md)
 
-## Getting started
+The first deployment target is an Updater-managed Linux Docker application connected through MCP Hub. The catalog generator prepares digested candidates; it does not publish or deploy. Credentials, endpoints, mount locations and live acceptance remain deployment-owned.
 
-Implementation has not started, so there are no installation, build, or execution commands yet. See the [initial roadmap](docs/ROADMAP.md) for the intended first slice and acceptance criteria.
+## FLAMORISの中での位置
 
-The implementation language, dependencies, project-file extension, and exact CLI/MCP commands will be selected and documented with the first implementation.
+[Organization map](https://github.com/flamoris-jp/.github) · [AI ecosystem](https://github.com/flamoris-jp/flamoris-ai/blob/main/docs/ai-ecosystem.md) · [Repository policy](https://github.com/flamoris-jp/flamoris-commons/blob/main/docs/repository-policy.md)
+
+[Kachinco](https://github.com/flamoris-jp/flamoris-kachinco) is the reference for a shared native engine and product-owned headless session. Cantabile owns music separately. Common connection/diagnostic infrastructure remains with [MCP Core](https://github.com/flamoris-jp/flamoris-mcp-core) and [Logging](https://github.com/flamoris-jp/flamoris-logging).
 
 ## Repository principles
 

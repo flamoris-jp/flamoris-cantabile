@@ -1,58 +1,41 @@
-# Cantabile initial roadmap / 初期ロードマップ
+# Cantabile roadmap / ロードマップ
 
-Status: `planned`. Every implementation item below is pending.
+Status: development — first implementation candidate under review. Source completion, local tests, CI, release, deployment and client listening are separate gates.
 
-## Accepted direction / 合意した方針
+## Implemented first slice / 最初の実装
 
-- Build a Linux-first, headless MIDI composition/export tool.
-- Use Cubase as the first MIDI handoff target for instrument playback and audio production.
-- Keep editable music-project data in Cantabile so later changes can target tracks, phrases, and individual notes.
-- Start without a GUI.
-- Add MCP access over the same editing core in a later slice, reusing applicable FLAMORIS infrastructure.
+- [x] Shared C++20 editing engine and C ABI.
+- [x] CLI, project save/load, atomic edits, revision guards and Undo/Redo.
+- [x] SMF Type 0/1 import/export with PPQ timing and opaque event preservation.
+- [x] General channel/meta/SysEx event edits, transpose and quantize.
+- [x] Shared FLAMORIS MCP adapter for workspace files, editing and bounded retrieval.
+- [x] Real FluidSynth offline WAV renderer with a separately installed SoundFont.
+- [x] Render snapshots, cancellation and result transfer.
+- [x] Docker/Updater candidate packaging and Linux/Windows CI definitions.
 
-These decisions define scope, not a claim that a runtime or integration already exists.
+Checkmarks describe source, not deployment. See [acceptance evidence](ACCEPTANCE.md) for checks actually run.
 
-## Phase 1 — Editable project and CLI
+## Next acceptance gates / 次の検証
 
-- [ ] Choose and document the implementation language, dependencies, project schema, and CLI contract.
-- [ ] Represent tracks, phrases, notes, tempo, and time signatures.
-- [ ] Preserve musical timing exactly enough to avoid cumulative rounding drift.
-- [ ] Validate note pitch, velocity, duration, position, and MIDI-channel allocation.
-- [ ] Save and reload the editable project.
-- [ ] Edit a bounded section without regenerating the rest of a song.
+- [ ] Observe GitHub CI on the final revision, including Windows build.
+- [ ] Build/run the actual Docker image without a display/audio device.
+- [ ] Validate the generated recipe with the selected Updater version.
+- [ ] Publish reviewed release assets with verified access and digests.
+- [ ] Fresh install, compatible update, data retention and restart/recovery through Updater.
+- [ ] Actual Hub connection, edits, save/load, MIDI export and complete WAV retrieval.
+- [ ] Import into the actual Cubase version and verify notes, tempo, meter and tracks.
+- [ ] Client audio presentation and actual model audio input/listening.
 
-Acceptance: a small multi-track music project can be created, validated, saved, reloaded, and edited from the command line without a display server.
+## Next implementation / 後続実装
 
-## Phase 2 — Standard MIDI export and Cubase handoff
+- [ ] Native VST 3 scan/load/render, plugin parameters and preset/state persistence.
+- [ ] Verify selected free Linux VST 3 instruments headlessly inside Docker.
+- [ ] Phrase arrangement, splits/joins, track reorder/duplicate and more transforms.
+- [ ] Range rendering and separate stems.
+- [ ] Larger upload contracts as concrete workflows need them.
+- [ ] Schema migration and compatible upgrade predecessor policy.
+- [ ] Windows GUI using the same core, schema, typed edits and history.
+- [ ] Verified Synthesizer V 2 note/lyric/phoneme handoff.
+- [ ] MIDI 2.0/UMP, SMF Type 2/SMPTE and live MIDI hardware when needed.
 
-- [ ] Export a Standard MIDI File, initially targeting multi-track SMF Type 1.
-- [ ] Preserve tempo/time-signature changes and track names.
-- [ ] Handle simultaneous note events, note-off ordering, channels, and drum-track allocation explicitly.
-- [ ] Export selected tracks as well as a whole song when required by the first production sample.
-- [ ] Check exports with an independent MIDI parser.
-- [ ] Import a sample into Cubase and record the actual application/version and observed result.
-
-Acceptance: the imported sample has the expected note pitches, note lengths, bar positions, track structure, tempo, and meter. Instrument assignment, playback, mixing, and WAV export are performed by Cubase.
-
-## Phase 3 — MCP access
-
-- [ ] Inspect current FLAMORIS MCP foundations before adding transport or logging infrastructure.
-- [ ] Expose bounded project inspection, edits, save/load, and MIDI export through the same core as the CLI.
-- [ ] Define revision guards, editing history, file boundaries, and error responses.
-- [ ] Record source verification separately from installation and live acceptance.
-
-MCP Hub remains the routing/aggregation layer. Cantabile remains authoritative for its own project and edits.
-
-## Later integrations / 後続候補
-
-- Note-to-lyric associations and a verified Synthesizer V 2 handoff.
-- Lightweight preview playback if it helps composition.
-- Optional DAW automation, instrument rendering, or a GUI when a concrete workflow needs them.
-
-These are candidates, not Phase 1 dependencies. Voice databases and commercial software are supplied by the user and are not bundled in this repository.
-
-## Current checkpoint / 現在の到達点
-
-- Repository created from the FLAMORIS template.
-- Project identity, ownership boundaries, first workflow, and acceptance goals documented.
-- No application code, runnable CLI, MIDI export, deployment, or live Cubase/Synthesizer V verification yet.
+MCP Hub routes, Updater owns deployment lifecycle, and Cantabile owns music projects, edits and its render jobs. The Windows UI will use the same editing engine.
