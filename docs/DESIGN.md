@@ -1,6 +1,6 @@
 # Cantabile design proposal / 設計案
 
-This document describes the target design. See [README](../README.md) and [acceptance evidence](ACCEPTANCE.md) for the first implementation candidate. VST 3 hosting, Windows GUI, deployment and client listening remain unfinished gates.
+This document preserves the target design, including future capabilities. The public v0.1.0 preview implements a bounded first slice; [README](../README.md), [PROTOCOL](PROTOCOL.md) and [acceptance evidence](ACCEPTANCE.md) define current behavior. Linux Docker/Updater/Hub acceptance and human playback are recorded. VST 3 hosting, Windows GUI, compatible updates, controlled restart, Cubase and model listening remain unfinished gates. Statements below about undecided schemas, optional backends or proposed versions are design history, not the current implementation contract.
 
 ## 1. Product goals / 目指す形
 

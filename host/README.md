@@ -64,8 +64,10 @@ remote Hub registration, instrument functionality, or client audio listening.
 There is no direct public HTTP MCP listener.
 
 The shared connector has bounded retries; the host refreshes it after exhaustion.
-Real Hub registration/round-trip and Docker/Updater acceptance remain separate
-live tests. No deployed service is claimed by building this source.
+A deployed 18-tool Hub round trip and fresh Docker/Updater installation have been
+accepted; see [acceptance evidence](../docs/ACCEPTANCE.md). Building this source alone
+does not establish a new deployment's acceptance. Compatible updates and controlled
+production restart/recovery remain separate tests.
 
 ### Static catalog
 
