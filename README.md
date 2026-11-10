@@ -4,7 +4,9 @@
 
 画面なしでMIDIを編集し、音楽を書き出すFLAMORIS音楽制作ツールです。将来のWindows GUIも同じ編集エンジンを利用します。
 
-**Status: development — first implementation candidate (0.1.0), under review.** No published release, deployed service, real Hub/Updater acceptance, or Windows GUI is claimed.
+**Status: development — [v0.1.0 preview published](https://github.com/flamoris-jp/flamoris-cantabile/releases/tag/v0.1.0).** The repository is public. Linux Docker/Updater installation, 18-tool Hub access, guarded MIDI editing, save/reopen and complete MIDI/WAV retrieval have been accepted in one deployment. Human playback was confirmed; Cubase import, compatible update, controlled restart, native MCP audio/model listening and the Windows GUI remain separate gates. See [acceptance evidence](docs/ACCEPTANCE.md).
+
+**現在：公開プレビュー v0.1.0。** AIがCLI/MCPで音符やトラックを組み立て、MIDIと試聴用WAVを書き出せます。実機での編集・保存・音声取得と人による試聴を確認済みです。VST 3とWindows GUIは今後の実装です。
 
 ## What it is / 何者か
 
@@ -12,9 +14,9 @@ Cantabile owns its music project, native typed edits and Undo/Redo, MIDI import/
 
 曲データと編集履歴の正本はCantabileが持ちます。MCP Hubは接続集約、Updaterは配布・更新を担当します。CubaseのプロジェクトやSynthesizer Vの歌声エンジンは、それぞれのアプリが所有します。
 
-## Implemented source / 今回の実装
+## Implemented features / 実装済みの機能
 
-| Area | First implementation |
+| Area | Current implementation |
 | --- | --- |
 | Native core | C++20, stable IDs, integer ticks, atomic edits, revision conflicts, Undo/Redo |
 | Editing | Tracks/events, notes, CC/program/pitch/pressure, meta/lyrics/markers/SysEx; transpose and quantize |
@@ -32,7 +34,15 @@ Type 2, SMPTE timing, extended/unknown chunks and malformed input fail explicitl
 
 The first audio backend uses a configured SoundFont and MIDI bank/program events. **VST 3 hosting, plugin presets, phrase arrangement, range/stem rendering and the Windows GUI remain pending.** Unsupported instrument settings fail instead of being silently substituted.
 
-Audio creation and complete-byte retrieval are testable independently. Native audio presentation and actual model listening require client acceptance; a WAV file alone does not establish that the AI heard it.
+Audio creation and complete-byte retrieval have been verified independently, and the operator has listened to the retrieved audio. Native MCP audio presentation and actual model listening still require separate client acceptance; a WAV file alone does not establish that the AI heard it.
+
+### Composition workflow / 作曲から作品へ
+
+1. A human or AI composes notes, tracks, tempo changes and MIDI events through the shared editing engine, then saves the editable Cantabile project.
+2. Export standard MIDI for a DAW, or render a WAV with the separately configured FluidSynth SoundFont and retrieve the complete file through MCP.
+3. Listen, revise and use the result in the next production stage. In the reported **Happinesses** experiment, a Cantabile composition was arranged and sung by **Suno**, then used for an anime-opening-style MV.
+
+Cantabile provides editable composition data and instrument rendering. It does not contain a generative composition model, Suno integration or a vocal-synthesis engine. Suno arrangement/vocals and DAW work happen outside Cantabile; the workflow above is a production example, not a bundled integration.
 
 ## Build and try / 画面なしで試す
 
@@ -69,13 +79,13 @@ The WAV path must be new. No display server, sound card, GPU or model API is use
 - [Native ABI, commands, MIDI scope and limits](docs/PROTOCOL.md)
 - [MCP host setup and tools](host/README.md)
 - [Renderer and audio tests](audio/README.md)
-- [Docker and Updater packaging candidate](packaging/README.md)
+- [Published preview and Docker/Updater distribution](packaging/README.md)
 - [Acceptance evidence](docs/ACCEPTANCE.md)
 - [Remaining roadmap](docs/ROADMAP.md)
 - [Target design](docs/DESIGN.md)
 - [Dependency licensing](THIRD_PARTY.md)
 
-The first deployment target is an Updater-managed Linux Docker application connected through MCP Hub. The catalog generator prepares digested candidates; it does not publish or deploy. Credentials, endpoints, mount locations and live acceptance remain deployment-owned.
+The published preview supplies a Linux/amd64 Docker archive, digested Updater catalog, image/source receipt, 18-tool Hub descriptor and license notices. The release workflow publishes verified assets; the local catalog generator only prepares candidates. Updater owns installation/lifecycle and MCP Hub owns routing. SoundFonts, credentials, endpoints and mount locations are configured separately by each deployment.
 
 ## FLAMORISの中での位置
 

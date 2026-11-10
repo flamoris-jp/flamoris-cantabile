@@ -1,7 +1,57 @@
-# First implementation acceptance / 初期実装の検証
+# Cantabile acceptance / 検証記録
 
-This records local source verification for the 0.1.0 implementation candidate.
-It is not a release, deployment, or actual client-listening receipt.
+Status checked 2026-11-11 (JST): public v0.1.0 preview. Source tests, published
+distribution, one deployment's live operations, human playback and model listening
+are distinct evidence levels.
+
+## Published release and CI
+
+- [v0.1.0 preview](https://github.com/flamoris-jp/flamoris-cantabile/releases/tag/v0.1.0)
+  was published on 2026-11-09; the repository is now public.
+- Verified release source: `8cf8ff8082a932f8b095052bd726cc93d46a5a3d`.
+- [Main CI 42616371261](https://github.com/flamoris-jp/flamoris-cantabile/actions/runs/42616371261)
+  passed Linux native, Windows native, real MCP host integration and Docker checks.
+- [Release run 42616608539](https://github.com/flamoris-jp/flamoris-cantabile/actions/runs/42616608539)
+  passed packaged tool-catalog parity, actual offline WAV synthesis and distribution
+  publication. The release includes the image archive, Updater catalog, image/source
+  receipt, 18-tool Hub descriptor and license notices.
+- These runs certify the release source above, not every later documentation commit.
+  Windows native CI is not Windows GUI or Windows audio-runtime acceptance.
+
+## Live deployment and use
+
+On 2026-11-09 one Linux deployment completed a fresh Updater Docker installation,
+official start/complete and independent running-container observation. Its dedicated
+18-tool Hub attachment and external-client discovery succeeded.
+
+Actual external MCP checks accepted guarded transposition, shared Undo/Redo,
+explicit project save/reopen and stale-revision rejection without mutation. MIDI
+export and FluidSynth WAV rendering completed; every chunk and complete-file
+SHA-256 were checked independently.
+
+| First Steps output | Observed value |
+| --- | --- |
+| MIDI | SMF 1, 480 PPQ, 5 tracks, 184 note-ons, 1769 bytes |
+| Musical duration | 14.357136 seconds, with the composed tempo change |
+| WAV | PCM16, 48 kHz stereo, 785143 frames, 3140616 bytes |
+| WAV duration | 16.3571458333 seconds, including two-second tail |
+| Independent PCM check | Peak 0.11151123046875; RMS 0.015440736730102383; no clipped samples |
+
+The operator confirmed listening to the retrieved trial WAV on 2026-11-09 and
+subsequently assessed the Midnight Side-Step composition. On 2026-11-10 the operator
+reported using a Cantabile composition for **Happinesses**, with **Suno** providing
+arrangement/vocals for an anime-opening-style MV experiment. These are production
+reports, not a built-in Suno integration or Cubase compatibility test. Media and
+deployment credentials/configuration are not included in this repository.
+
+On 2026-11-11 read-only checks found the configured FluidSynth backend available
+and saved composition projects listed. This is a dated observation, not continuous
+health, a new render test, or restart acceptance.
+
+## Initial local source verification
+
+The following results were recorded during the first implementation. They are
+retained as historical source evidence, not newly rerun tests for this documentation update.
 
 ## Verified locally
 
@@ -54,17 +104,15 @@ See the host/audio READMEs for environment variables.
 
 ## Still pending
 
-- Final-revision GitHub CI observation, including Windows native build.
-- Actual Docker build/run and Updater recipe/install/update acceptance.
-- Actual Hub WSS connection, schema parity and deployment configuration.
+- Compatible Updater update, migrations and retained-data behavior across versions.
+- Controlled production restart/recovery and live MIDI reimport.
 - Actual Cubase import and visual/playback acceptance.
 - VST 3 hosting, plugin preset/parameter state, range/stem rendering.
 - Native MCP audio presentation and actual model audio input/listening.
 - Windows GUI and cross-platform runtime/audio compatibility.
 
-This execution environment denies local socket/named-pipe listeners, so the local
-MCP integration uses the official SDK's direct stdio transport over the same Core
-permission/editing boundary. No socket restriction was disabled. The actual Hub
-WSS provider and loopback health listener remain separate live acceptance gates.
-Docker is not available locally. Distribution metadata fixture tests do not
-substitute for image/startup/Updater verification.
+The initial local execution environment denied socket/named-pipe listeners and
+had no Docker. Its official-SDK stdio checks therefore did not certify Hub WSS,
+loopback health or Docker behavior. Later GitHub CI, release and bounded deployment
+checks above supplied separate evidence; no local restriction was disabled.
+Human playback does not establish that the AI received or heard the audio.

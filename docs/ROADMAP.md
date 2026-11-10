@@ -1,6 +1,6 @@
 # Cantabile roadmap / ロードマップ
 
-Status: development — first implementation candidate under review. Source completion, local tests, CI, release, deployment and client listening are separate gates.
+Status: development — public v0.1.0 preview. Source, CI, release and bounded deployment acceptance are recorded in [ACCEPTANCE.md](ACCEPTANCE.md). Human playback is confirmed; model audio input/listening remains unverified.
 
 ## Implemented first slice / 最初の実装
 
@@ -15,16 +15,18 @@ Status: development — first implementation candidate under review. Source comp
 
 Checkmarks describe source, not deployment. See [acceptance evidence](ACCEPTANCE.md) for checks actually run.
 
-## Next acceptance gates / 次の検証
+## Acceptance progress / 検証の進捗
 
-- [ ] Observe GitHub CI on the final revision, including Windows build.
-- [ ] Build/run the actual Docker image without a display/audio device.
-- [ ] Validate the generated recipe with the selected Updater version.
-- [ ] Publish reviewed release assets with verified access and digests.
-- [ ] Fresh install, compatible update, data retention and restart/recovery through Updater.
-- [ ] Actual Hub connection, edits, save/load, MIDI export and complete WAV retrieval.
+- [x] Observe successful release-source GitHub CI, including Windows native build.
+- [x] Build/run the actual Docker image without a display/audio device.
+- [x] Publish v0.1.0 preview assets with verified digests; repository is now public.
+- [x] Validate the generated recipe and complete a fresh Updater installation/start.
+- [x] Actual 18-tool Hub access, guarded edits/history, save/reopen, MIDI export and complete WAV retrieval.
+- [x] Human playback of retrieved audio, followed by reported composition/arrangement experiments.
+- [ ] Compatible update and retained-data acceptance across versions.
+- [ ] Controlled process restart/recovery and live MIDI reimport.
 - [ ] Import into the actual Cubase version and verify notes, tempo, meter and tracks.
-- [ ] Client audio presentation and actual model audio input/listening.
+- [ ] Native MCP audio presentation and actual model audio input/listening.
 
 ## Next implementation / 後続実装
 
