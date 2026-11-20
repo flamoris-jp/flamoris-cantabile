@@ -27,6 +27,10 @@ add_executable(cantabile-client
 target_include_directories(cantabile-client PRIVATE ../../include)
 target_compile_features(cantabile-client PRIVATE cxx_std_20)
 target_link_libraries(cantabile-client PRIVATE sdk sdk_hosting nlohmann_json::nlohmann_json ${CMAKE_DL_LIBS})
+if(MSVC)
+    # The SDK's Windows module checks __cplusplus to handle char8_t paths.
+    target_compile_options(cantabile-client PRIVATE /Zc:__cplusplus)
+endif()
 if(WIN32)
     target_link_libraries(cantabile-client PRIVATE ole32 shell32)
     if(MINGW)
