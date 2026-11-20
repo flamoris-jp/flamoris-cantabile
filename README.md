@@ -13,6 +13,10 @@ installed instrument and can render a MIDI part through CLI or MCP. Keep the
 exported MIDI to edit in Cubase. See the [Windows preview guide](audio/vst3/README.md)
 for preset setup and supported scope.
 
+Windows users can use the [GitHub CLI update launcher](audio/vst3/CantabileClient-Update.cmd)
+to fetch the latest successful main Windows build without manually downloading
+ZIPs. See [authentication, update selection and fallback behavior](audio/vst3/README.md#updating-on-windows-without-manually-downloading-zips).
+
 The development host can also select paced VST rendering and startup wait through
 `CANTABILE_VST3_REALTIME` / `CANTABILE_VST3_WARMUP_MS`. An EZkeys 2 workstation
 CLI test was accepted with the original Cubase MIDI, a saved Follow Host OFF

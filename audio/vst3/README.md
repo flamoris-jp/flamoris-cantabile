@@ -6,6 +6,43 @@ part with Cantabile's existing MIDI codec and renders the selected instrument to
 open the WAV and MIDI at the same position, route MIDI to the original instrument,
 and continue editing notes, timing and velocity.
 
+## Updating on Windows without manually downloading ZIPs
+
+Use [CantabileClient-Update.cmd](CantabileClient-Update.cmd), the existing
+GitHub CLI update launcher. Copy it to a permanent, writable parent folder,
+outside any versioned `CantabileClient-<run-id>` folder.
+
+Install GitHub CLI first, then check authentication under your normal Windows
+account in PowerShell:
+
+```powershell
+gh auth status
+# If not authenticated:
+gh auth login
+```
+
+Double-click `CantabileClient-Update.cmd`. It selects the latest successful
+**push to main** run of `cantabile-client.yml` and downloads the
+`CantabileClient-win-x64` artifact next to the launcher. PR builds and failed or
+unfinished main builds are excluded. After a PR is merged, wait for the main
+Windows workflow to succeed before running the launcher to obtain that change.
+
+- Each build is extracted into `CantabileClient-<run-id>`. A `.complete` marker
+  skips a repeated download after the executable has been found.
+- `CantabileClient-current.txt` records the selected folder.
+- If discovery/download fails (including an expired artifact), the launcher
+  tries the recorded installation, or the sibling `CantabileClient` folder.
+  Check the displayed folder/build ID: fallback can launch an older version.
+- It opens PowerShell in the selected folder and prints `cantabile-client
+  --help`. It does **not** start the MCP host or restore `$plugin`/`$data` from
+  another shell. Configure those variables in the new shell when needed.
+
+Keep MIDI, WAV, presets and private connector credentials in a separate data
+folder. Switching version folders does not migrate files or running processes;
+restart an existing MCP host explicitly with the new host executable and the
+same intended workspace/settings. The launcher is a preview-artifact updater,
+not a published-release installer.
+
 ## Windows quick start
 
 1. Open the instrument in Cubase, select the sound, then choose **Save Preset**
