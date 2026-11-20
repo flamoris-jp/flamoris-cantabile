@@ -8,6 +8,11 @@
 
 **現在：公開プレビュー v0.1.0。** AIがCLI/MCPで音符やトラックを組み立て、MIDIと試聴用WAVを書き出せます。実機での編集・保存・音声取得と人による試聴を確認済みです。VST 3とWindows GUIは今後の実装です。
 
+**CantabileClient in development.** The optional headless VST 3 build runs one
+installed instrument and can render a MIDI part through CLI or MCP. Keep the
+exported MIDI to edit in Cubase. See the [Windows preview guide](audio/vst3/README.md)
+for preset setup and supported scope.
+
 ## What it is / 何者か
 
 Cantabile owns its music project, native typed edits and Undo/Redo, MIDI import/export, project persistence, and offline render jobs. CLI and MCP operate the same C++20 core through a small C ABI. The .NET 10 host reuses FLAMORIS MCP Core and Logging.
@@ -32,7 +37,7 @@ Imported note-on/off messages remain raw events to preserve overlaps, unmatched 
 
 Type 2, SMPTE timing, extended/unknown chunks and malformed input fail explicitly. History is bounded and session-local; project saves do not persist Undo history.
 
-The first audio backend uses a configured SoundFont and MIDI bank/program events. **VST 3 hosting, plugin presets, phrase arrangement, range/stem rendering and the Windows GUI remain pending.** Unsupported instrument settings fail instead of being silently substituted.
+The first audio backend uses a configured SoundFont and MIDI bank/program events. **The optional CantabileClient preview adds offline VST 3 hosting with one preset. Multi-instrument VST projects, phrase arrangement, range/stem rendering and the Windows GUI remain pending.** Unsupported instrument settings fail instead of being silently substituted.
 
 Audio creation and complete-byte retrieval have been verified independently, and the operator has listened to the retrieved audio. Native MCP audio presentation and actual model listening still require separate client acceptance; a WAV file alone does not establish that the AI heard it.
 

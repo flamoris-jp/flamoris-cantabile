@@ -110,7 +110,7 @@ engine independently receives the current expected revision.
 | `file_list` | `{}`; retained immutable exports, including restart recovery |
 | `file_read` | `file_id`, `offset`, optional `max_bytes`; base64 bytes, next offset and chunk/full SHA-256 |
 | `file_release` | `file_id`; explicitly deletes one exported artifact/manifest to reclaim quota; never deletes project files |
-| `instruments_list` | `{}`; actual configured backend availability and current VST limitation |
+| `instruments_list` | `{}`; configured backend and availability |
 | `audio_render` | Optional `max_seconds` 1–600; snapshots MIDI with mute/solo playback filtering and returns a job ID |
 | `audio_status` | `job_id`; terminal state, curated audio measurements, immutable WAV artifact metadata |
 | `audio_cancel` | `job_id`; cancels an active owned job; completed artifacts stay available |
@@ -150,24 +150,17 @@ symlinks. Save and publication use same-directory atomic rename.
 
 ## Audio behavior
 
-The first renderer is **FluidSynth with one host-configured SoundFont**. It is a
-free-software, device-free offline rendering path. It is not a VST host.
+The published 0.1 preview defaults to **FluidSynth** with a host-configured
+SoundFont. In development builds, set `CANTABILE_RENDERER` to the optional
+CantabileClient executable and `CANTABILE_VST3_MODULE` to the user-installed
+instrument. Set `CANTABILE_VST3_PRESET` and `CANTABILE_VST3_CLASS_ID` as needed.
+See the [CantabileClient guide](../audio/vst3/README.md) for the Windows workflow.
 
-Instrument metadata can be persisted by the native editor for later adapters,
-but current audio rendering accepts only no instrument object, an empty object,
-or `{ "backend": "fluidsynth" }`. Unsupported backends or settings are rejected
-instead of silently ignored. Set GM instrument bank/program through MIDI events.
-
-Rendering uses `midi.export` with `playback:true`, preserving conductor meta data
-while suppressing muted/nonsolo channel performance. Ordinary MIDI export keeps
-all tracks. A worker uses a fixed configured executable and SoundFont path, a
-bounded output capture and deadline, and an allowlisted environment. It never
-receives MCP credentials or arbitrary caller-chosen executable arguments.
-
-Completed WAV bytes are retrieved using `file_read`. This first host does **not**
-claim native MCP audio blocks or model audio input: Core 1.4's rich-result API
-currently exposes images, not audio. Client playback and actual model listening
-must be verified independently after retrieving and presenting the audio.
+Audio rendering uses the one active host backend. A track may omit its
+instrument object, use an empty object, or name the matching `backend`.
+Other track instrument settings are rejected. FluidSynth chooses sounds via
+MIDI bank/program events. CantabileClient uses the configured VST preset and
+accepts one musical part per render.
 
 ## Verification
 

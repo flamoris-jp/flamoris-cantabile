@@ -11,6 +11,7 @@ licenses; this document does not relicense them or separately supplied music.
 | ModelContextProtocol SDK and .NET runtime | Official protocol implementation via shared Core | Preserve the notices shipped by the restored packages and runtime |
 | FluidSynth | Separately loaded synthesis library in the audio worker | LGPL-2.1-or-later; https://github.com/FluidSynth/fluidsynth |
 | SoundFont | User-configured instrument/sample data | Separate bank-specific terms; not bundled in this repository |
+| Steinberg VST 3 SDK 3.8.0 build 66 | Optional CantabileClient build-time SDK and test plugin | MIT, https://github.com/steinbergmedia/vst3sdk/tree/v3.8.0_build_66 |
 | mido 1.3.3 | Independent parser in development tests | MIT; test-only, not bundled with runtime |
 
 The Docker recipe installs FluidSynth from the Ubuntu package repository and
@@ -19,7 +20,7 @@ nlohmann/json copyright notice into the runtime image. Do not remove required
 package/runtime notices when producing release artifacts.
 
 Actual audio tests use an independently installed TimGM6mb SoundFont. No bank,
-generated MIDI, or generated audio is committed. SoundFont usage/distribution and
-rendered-work terms must be checked for each chosen bank. Surge XT and VST 3 SDK
-are design references only; their code and binaries are not bundled or hosted by
-this first implementation.
+generated MIDI, or generated audio is committed. SoundFont usage/distribution and rendered-work terms must be checked for each chosen bank.
+CantabileClient binaries preserve the SDK notices with the portable package.
+Third-party instruments, presets, sample libraries and the SDK smoke-test plugin
+are not distributed in that package.

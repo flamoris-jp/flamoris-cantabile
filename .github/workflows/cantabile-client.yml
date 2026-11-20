@@ -1,0 +1,64 @@
+name: Verify CantabileClient
+on:
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  windows-vst3:
+    runs-on: windows-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+      - name: Install build dependencies
+        shell: pwsh
+        run: |
+          python -m pip install nlohmann_json==3.12.0
+          git clone --depth 1 --branch v3.8.0_build_66 https://github.com/steinbergmedia/vst3sdk.git "$env:RUNNER_TEMP/vst3sdk"
+          git -C "$env:RUNNER_TEMP/vst3sdk" submodule update --init base cmake pluginterfaces public.sdk
+      - name: Build Windows x64 CLI and VST 3 host
+        shell: pwsh
+        run: |
+          $headers = python -c "import nlohmann_json; print(nlohmann_json.get_include())"
+          cmake -S . -B build-vst -G "Visual Studio 17 2022" -A x64 "-DJSON_INCLUDE_DIR=$headers" "-DCANTABILE_VST3_SDK=$env:RUNNER_TEMP/vst3sdk" -DCANTABILE_VST3_TEST_PLUGIN=ON
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          cmake --build build-vst --config Release --parallel 2 --target cantabile-client cantabile-cli cantabile-render mda-vst3
+      - name: Build existing MCP host
+        run: dotnet build host/Flamoris.Cantabile.Host.csproj -c Release
+      - name: Render on Windows and retrieve WAV and MIDI through MCP
+        shell: pwsh
+        run: |
+          $worker = (Resolve-Path build-vst/audio/vst3/Release/cantabile-client.exe).Path
+          $cli = (Resolve-Path build-vst/Release/cantabile-cli.exe).Path
+          $core = (Resolve-Path build-vst/Release/cantabile_core.dll).Path
+          $plugin = (Resolve-Path build-vst/VST3/Release/mda-vst3.vst3).Path
+          python audio/vst3/tests/smoke.py $worker $cli $plugin
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          python audio/vst3/tests/mcp_smoke.py $worker $cli $plugin $core
+      - name: Prepare portable preview
+        shell: pwsh
+        run: |
+          cmake --install build-vst --config Release --prefix client-package
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          dotnet publish host/Flamoris.Cantabile.Host.csproj -c Release -r win-x64 --self-contained true -o client-package/host
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          Copy-Item LICENSE client-package/LICENSE
+          Copy-Item THIRD_PARTY.md client-package/THIRD_PARTY.md
+          $jsonLicense = python -c "from importlib.metadata import distribution; d=distribution('nlohmann_json'); print(next(d.locate_file(f) for f in d.files if str(f).endswith('/licenses/LICENSE')))"
+          Copy-Item $jsonLicense client-package/nlohmann-json-LICENSE.txt
+          Copy-Item audio/vst3/README.md client-package/README.md
+          Copy-Item "$env:RUNNER_TEMP/vst3sdk/LICENSE.txt" client-package/VST3-SDK-LICENSE.txt
+          Copy-Item "$env:RUNNER_TEMP/vst3sdk/base/LICENSE.txt" client-package/VST3-base-LICENSE.txt
+          Copy-Item "$env:RUNNER_TEMP/vst3sdk/public.sdk/LICENSE.txt" client-package/VST3-public-sdk-LICENSE.txt
+          Copy-Item "$env:RUNNER_TEMP/vst3sdk/pluginterfaces/LICENSE.txt" client-package/VST3-pluginterfaces-LICENSE.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: CantabileClient-win-x64
+          path: client-package/
+          if-no-files-found: error

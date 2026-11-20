@@ -748,7 +748,7 @@
     },
     {
       "name": "instruments_list",
-      "description": "Report actually configured render backends. VST 3 is not implemented in this first slice.",
+      "description": "Report the configured offline render backend and its availability.",
       "input_schema": {
         "type": "object",
         "properties": {
@@ -797,7 +797,7 @@
     },
     {
       "name": "audio_render",
-      "description": "Snapshot the current project to a bounded offline FluidSynth WAV job. VST instrument requests fail explicitly.",
+      "description": "Snapshot the current project to a bounded offline WAV job using the host-configured backend.",
       "input_schema": {
         "type": "object",
         "properties": {
