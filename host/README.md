@@ -79,6 +79,16 @@ dotnet host/bin/Release/net10.0/cantabile-host.dll catalog \
 This outputs the actual complete tool input schemas plus effect annotations.
 Use it to pin the matching Hub catalog; do not guess schemas from this guide.
 
+The development catalog has 21 tools. The three VST additions are
+`vst_inspect`, `vst_script` and `vst_script_write`; the earlier deployed preview
+had 18. `vst_inspect` and `vst_script` are read-only queries. The write tool also
+requires the edit grant, a current guard and the host setting
+`CANTABILE_VST3_SCRIPT_WRITE=true` (disabled by default).
+
+See the [VST operation specification](../docs/VST3_CONTROL.md) for the closed
+JSON DSL, configured instrument, state artifacts, isolated worker deadlines and
+workstation acceptance. The new catalog does not update a running Hub deployment.
+
 ## MCP tools
 
 Every product call uses the shared Core wrapper:

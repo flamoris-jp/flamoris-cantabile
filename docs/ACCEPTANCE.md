@@ -34,7 +34,7 @@ through standard `getState` / `setComponentState`, so parameter values observed
 before and after a state round trip describe the same actual initial sound.
 Unsupported parameter display conversion is represented by JSON `null`.
 
-Windows workflow results will be recorded after CI completes. The local MCP
+Windows workflow results are tracked in [PR #9 checks](https://github.com/flamoris-jp/flamoris-cantabile/pull/9/checks), separately from the local results above. The local MCP
 checks use actual stdio/Core/native/worker calls and do not certify a deployed
 Hub attachment. No commercial preset or media is committed. The
 [operation specification](VST3_CONTROL.md) provides per-product
