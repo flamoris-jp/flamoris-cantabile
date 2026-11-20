@@ -25,7 +25,12 @@ def main(worker, cli, plugin):
     with TemporaryDirectory() as directory:
         folder = Path(directory) / "操作"
         folder.mkdir()
-        midi = midi_fixture(cli, folder)
+        # The existing MIDI CLI accepts narrow argv on Windows. Generate the
+        # fixture outside the Unicode directory, then test the wide-path VST
+        # worker with the copied MIDI, as the original render smoke does.
+        fixture = midi_fixture(cli, folder.parent)
+        midi = folder / "piano.mid"
+        midi.write_bytes(fixture.read_bytes())
         midi_digest = hashlib.sha256(midi.read_bytes()).digest()
         request = folder / "request.json"
         arguments = ["--plugin", plugin, "--class-id", piano["id"]]
