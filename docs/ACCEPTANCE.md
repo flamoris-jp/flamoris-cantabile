@@ -4,6 +4,43 @@ Published-release status checked 2026-11-11 (JST): public v0.1.0 preview. Source
 distribution, one deployment's live operations, human playback and model listening
 are distinct evidence levels.
 
+## Issue #8: Inspector and Script Controller local verification
+
+The development source was built and tested locally on Linux with GCC 14.2,
+Steinberg VST 3 SDK `v3.8.0_build_66` and .NET SDK 10.0.403. These checks use the
+SDK's mda Piano, not EZkeys 2, EZdrummer 3 or EZbass. Windows CI for this change,
+commercial-instrument controls and deployed Hub routing remain separate gates.
+
+| Check | Observed result |
+| --- | --- |
+| Native CMake build | Passed |
+| Managed Release build | Passed, zero warnings/errors |
+| Native CTest | 1 passed |
+| Native Python interoperability suite | 27 passed |
+| Actual FluidSynth synthesis suite | 17 passed |
+| Packaging/entrypoint suites | 10 passed |
+| Existing MCP host integration | 6 passed |
+| VST host safety suite | 9 passed |
+| Phase 1 Inspector with mda Piano | Passed: 15 public parameters, 2 buses, 64 MIDI mappings, 8 programs |
+| Phase 2 native Script Controller | Passed: parameter readback and changed processor audio, standard preset round trip, state rollback, permissions/schema/path/resource limits |
+| Real MCP Inspector/Script controls | Passed: JSON inspection, parameter/state round trip, MIDI/WAV transfer, read-only/write opt-in, persistent artifacts and error isolation |
+| Existing VST MCP rendering regression | Passed: offline/realtime identical PCM and MIDI, processing configuration, startup wait and cancellation |
+
+The Inspector gate ran before Phase 2. The script tests generated temporary
+MIDI/WAV/state fixtures, compared actual rendered audio after parameter changes,
+and verified that a later failure restored state and published no partial
+outputs. Initialization now synchronizes processor state into the edit controller
+through standard `getState` / `setComponentState`, so parameter values observed
+before and after a state round trip describe the same actual initial sound.
+Unsupported parameter display conversion is represented by JSON `null`.
+
+Windows workflow results will be recorded after CI completes. The local MCP
+checks use actual stdio/Core/native/worker calls and do not certify a deployed
+Hub attachment. No commercial preset or media is committed. The
+[operation specification](VST3_CONTROL.md) provides per-product
+workstation steps and describes capability reports separately from MIDI-output
+capture, which is not implemented in these phases.
+
 ## 2026-11-20: CantabileClient development CLI and MCP
 
 - The workstation operator confirmed sustained notes from the original Cubase
@@ -138,7 +175,10 @@ See the host/audio READMEs for environment variables.
 - Compatible Updater update, migrations and retained-data behavior across versions.
 - Controlled production restart/recovery and live MIDI reimport.
 - Actual Cubase import and visual/playback acceptance.
-- VST 3 hosting, plugin preset/parameter state, range/stem rendering.
+- Installed commercial VST 3 Inspector/Script acceptance and state restoration;
+  multi-instrument projects and range/stem rendering. The development source now
+  implements single-instrument hosting and restricted public parameter/state
+  control; see [the contract and workstation test procedure](VST3_CONTROL.md).
 - Native MCP audio presentation and actual model audio input/listening.
 - Windows GUI and cross-platform runtime/audio compatibility.
 

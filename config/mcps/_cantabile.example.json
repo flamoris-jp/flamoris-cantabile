@@ -965,6 +965,175 @@
         "destructiveHint": true,
         "openWorldHint": false
       }
+    },
+    {
+      "name": "vst_inspect",
+      "description": "Read the configured VST 3 instrument's public parameters, MIDI mappings, buses, programs and interfaces as JSON in an isolated bounded worker.",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "input": {
+            "type": "object",
+            "properties": {},
+            "required": [],
+            "additionalProperties": false
+          },
+          "guard": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "runtimeId": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 128
+              },
+              "documentToken": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 128
+              },
+              "expectedRevision": {
+                "type": "string",
+                "pattern": "^(0|[1-9][0-9]*)$",
+                "maxLength": 19
+              }
+            },
+            "required": [
+              "runtimeId",
+              "documentToken"
+            ]
+          }
+        },
+        "additionalProperties": false,
+        "required": [
+          "input"
+        ]
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "vst_script",
+      "description": "Run a bounded version-1 JSON VST script with inspect, list_parameters and get_parameter only. No file bindings or writes.",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "input": {
+            "type": "object",
+            "properties": {
+              "script": {
+                "type": "object"
+              }
+            },
+            "required": [
+              "script"
+            ],
+            "additionalProperties": false
+          },
+          "guard": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "runtimeId": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 128
+              },
+              "documentToken": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 128
+              },
+              "expectedRevision": {
+                "type": "string",
+                "pattern": "^(0|[1-9][0-9]*)$",
+                "maxLength": 19
+              }
+            },
+            "required": [
+              "runtimeId",
+              "documentToken"
+            ]
+          }
+        },
+        "additionalProperties": false,
+        "required": [
+          "input"
+        ]
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "vst_script_write",
+      "description": "Run allowed VST parameter, MIDI/render and state operations after Inspector validation. Requires edit permission, current guard and host CANTABILE_VST3_SCRIPT_WRITE opt-in. Current project MIDI is input.mid; files binds existing MIDI/state artifact IDs to safe basenames. Outputs publish only on success.",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "input": {
+            "type": "object",
+            "properties": {
+              "script": {
+                "type": "object"
+              },
+              "files": {
+                "type": "object",
+                "maxProperties": 16,
+                "additionalProperties": {
+                  "type": "string",
+                  "pattern": "^[a-f0-9]{32}$"
+                }
+              }
+            },
+            "required": [
+              "script"
+            ],
+            "additionalProperties": false
+          },
+          "guard": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "runtimeId": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 128
+              },
+              "documentToken": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 128
+              },
+              "expectedRevision": {
+                "type": "string",
+                "pattern": "^(0|[1-9][0-9]*)$",
+                "maxLength": 19
+              }
+            },
+            "required": [
+              "runtimeId",
+              "documentToken",
+              "expectedRevision"
+            ]
+          }
+        },
+        "additionalProperties": false,
+        "required": [
+          "input",
+          "guard"
+        ]
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": true,
+        "openWorldHint": false
+      }
     }
   ]
 }

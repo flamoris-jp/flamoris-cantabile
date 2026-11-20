@@ -14,6 +14,7 @@ public sealed class EditorHost : IMcpHost, IAsyncDisposable
     private readonly string runtimeId = Guid.NewGuid().ToString("N");
     public bool Dirty { get; private set; }
     public RenderJobs Renders { get; }
+    private VstController Vst { get; }
     public McpBoundary Boundary { get; }
     public HostSnapshot Snapshot => new("flamoris.cantabile", "0.1.0", runtimeId, documentToken, engine.Revision);
     public event Action? Invalidating;
@@ -21,7 +22,7 @@ public sealed class EditorHost : IMcpHost, IAsyncDisposable
     {
         try
         {
-            workspace = new Workspace(directory); Renders = new RenderJobs(workspace);
+            workspace = new Workspace(directory); Renders = new RenderJobs(workspace); Vst = new VstController(workspace);
             var saved = workspace.ReadProject(workspace.ActiveName);
             if (saved is { } loaded)
             {
@@ -155,6 +156,15 @@ public sealed class EditorHost : IMcpHost, IAsyncDisposable
             x => { Decode(x, "job_id"); _ = Text(x, "job_id", 32); return x; }, (ctx, x, _) => ctx.ReadAsync(() => Renders.Status(Text(x, "job_id", 32))), foreground: false);
         yield return new HostTool<JsonElement>("audio_cancel", "Cancel one current host-owned audio render job.", Schema(new { job_id = new { type = "string", maxLength = 32 } }, ["job_id"]), OperationKind.Mutation,
             x => { Decode(x, "job_id"); _ = Text(x, "job_id", 32); return x; }, (ctx, x, _) => ctx.CommitAsync(() => Renders.Cancel(Text(x, "job_id", 32))));
+        yield return new HostTool<JsonElement>("vst_inspect", "Read the configured VST 3 instrument's public parameters, MIDI mappings, buses, programs and interfaces as JSON in an isolated bounded worker.",
+            EmptySchema, OperationKind.Query, VstController.InspectInput,
+            (ctx, _, token) => ctx.ReadAsync(() => Vst.Inspect(token)), foreground: false);
+        yield return new HostTool<JsonElement>("vst_script", "Run a bounded version-1 JSON VST script with inspect, list_parameters and get_parameter only. No file bindings or writes.",
+            Schema(new { script = new { type = "object" } }, ["script"]), OperationKind.Query,
+            x => VstController.ScriptInput(x, false), (ctx, x, token) => ctx.ReadAsync(() => Vst.Script(x, false, null, engine.Revision, token)), foreground: false);
+        yield return new HostTool<JsonElement>("vst_script_write", "Run allowed VST parameter, MIDI/render and state operations after Inspector validation. Requires edit permission, current guard and host CANTABILE_VST3_SCRIPT_WRITE opt-in. Current project MIDI is input.mid; files binds existing MIDI/state artifact IDs to safe basenames. Outputs publish only on success.",
+            Schema(new { script = new { type = "object" }, files = new { type = "object", maxProperties = 16, additionalProperties = new { type = "string", pattern = "^[a-f0-9]{32}$" } } }, ["script"]), OperationKind.Transaction,
+            x => VstController.ScriptInput(x, true), (ctx, x, token) => ctx.CommitAsync(() => Vst.Script(x, true, Midi(playback: true), engine.Revision, token)));
     }
     private void DemandDiscard(JsonElement input) { if (Dirty && !Field(input, "discard_unsaved").GetBoolean()) throw new McpFault("unsaved_changes"); }
     public RequestGuard CurrentGuard() => new(runtimeId, documentToken, engine.Revision);

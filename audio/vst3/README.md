@@ -6,6 +6,13 @@ part with Cantabile's existing MIDI codec and renders the selected instrument to
 open the WAV and MIDI at the same position, route MIDI to the original instrument,
 and continue editing notes, timing and velocity.
 
+The development build also provides a read-only VST 3 Inspector and a restricted
+JSON Script Controller. These use standard VST 3 interfaces; they do not open a
+general-purpose interpreter or call private songwriting APIs. See the
+[operation specification and EZ-series investigation procedure](../../docs/VST3_CONTROL.md).
+In the extracted portable preview, the same specification is included as
+`docs/VST3_CONTROL.md` beside the installed README.
+
 ## Updating on Windows without manually downloading ZIPs
 
 Use [CantabileClient-Update.cmd](CantabileClient-Update.cmd), the existing
@@ -65,6 +72,33 @@ If a module lists several instruments, pass `--class-id` with the ID from
 `list`. Without `--preset`, the worker uses the plugin's default state.
 The output path must be new. A successful render prints JSON with the sample
 rate, duration, peak and clipped-sample count.
+
+### Inspect and control public VST 3 features
+
+Inspect the same module and preset before selecting any parameter to change:
+
+```powershell
+.\bin\cantabile-client.exe inspect --plugin $plugin --preset '.\Studio Piano.vstpreset'
+```
+
+The JSON describes the selected class, public parameters, MIDI mappings, buses,
+program information and a defined set of standard interfaces. An unsupported
+interface is reported explicitly. An event output bus identifies a capability;
+it does not establish that an internal song can be exported or triggered.
+
+For scripts, create a private data directory and a UTF-8 JSON request using the
+closed operation set in [VST3_CONTROL.md](../../docs/VST3_CONTROL.md). Then run:
+
+```powershell
+.\bin\cantabile-client.exe script --plugin $plugin --preset '.\Studio Piano.vstpreset' --script '.\request.json' --workspace '.\script-data'
+# Add --allow-write only for a reviewed request that changes parameters,
+# loads/saves state, queues MIDI or renders files.
+```
+
+Without `--allow-write`, scripts only inspect or read parameter values. Every
+script validates the Inspector result before executing operations. File operands
+are single portable basenames within the configured workspace. No loops,
+expressions, OS commands, Python or JavaScript are accepted.
 
 If a sample instrument returns `SILENT_AUDIO`, try adding
 `--realtime --warmup-ms 5000`. This requests VST real-time processing,
@@ -134,6 +168,14 @@ default to offline/zero wait. Invalid values stop a VST-configured host with
 jobs and cannot be changed by an MCP caller. Restart the host after changing
 them. FluidSynth does not use these VST settings.
 
+The same connection exposes `vst_inspect` and `vst_script` for read-only
+operations. `vst_script_write` additionally requires the host's `edit` grant,
+the current revision/session guard, and trusted
+`CANTABILE_VST3_SCRIPT_WRITE=true` configuration. A caller cannot enable that
+configuration or select another executable/module. Script inputs bind workspace
+artifact IDs to portable names, and completed outputs use the existing bounded
+`file_read` transfer. See the exact [MCP request contract](../../docs/VST3_CONTROL.md#mcp-contract).
+
 `instruments_list` and successful `audio_status.audio` report `process_mode` and
 `warmup_ms`. Confirm `vst3`, `realtime` and `5000` on the Windows connection before
 testing the original MIDI. The job wall-clock budget includes the startup wait
@@ -161,6 +203,9 @@ acceptance alone does not establish remote availability.
 
 The Windows workflow builds the CLI and managed host, tests rendering and
 MCP round trips with the SDK's mda Piano, and uploads `CantabileClient-win-x64`.
+Inspector verification precedes Script Controller verification in the workflow.
+The control tests exercise parameter changes, state round trips and rejected
+operations independently of the existing MIDI-to-WAV regression tests.
 The same native smoke test can run on Linux x64 with
 `-DCANTABILE_VST3_TEST_PLUGIN=ON`, the `cantabile-vst3-test-plugin` target, and
 `audio/vst3/tests/smoke.py`.
@@ -180,3 +225,10 @@ preset needs its own Windows smoke test, including licenses, sound libraries and
 whether the plugin can initialize without a control panel. The worker creates
 no plugin editor windows. The portable package uses the normal Microsoft x64
 C++ runtime. Install the Redistributable if Windows reports it missing.
+
+Native plugins execute machine code with the worker account's OS permissions.
+The closed script language limits the control surface; it is not an OS sandbox
+for an untrusted VST binary. The MCP host terminates its worker on timeout or
+cancellation. Caught operation failures attempt standard state restoration and
+discard new outputs; termination discards the isolated worker, so no live Cubase
+instance is changed. See the operation specification for the recovery boundary.
