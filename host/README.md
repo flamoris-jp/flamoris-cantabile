@@ -156,6 +156,23 @@ CantabileClient executable and `CANTABILE_VST3_MODULE` to the user-installed
 instrument. Set `CANTABILE_VST3_PRESET` and `CANTABILE_VST3_CLASS_ID` as needed.
 See the [CantabileClient guide](../audio/vst3/README.md) for the Windows workflow.
 
+For sample instruments that need paced processing, set
+`CANTABILE_VST3_REALTIME=true` and optionally
+`CANTABILE_VST3_WARMUP_MS=5000` before starting either `stdio` or `serve`.
+The real-time setting accepts `true`/`false` (case-insensitive) and `1`/`0`;
+the startup wait is an unsigned decimal integer from 0 to 30000 milliseconds.
+Unset/empty settings default to offline and zero wait. Malformed VST settings
+stop a VST-configured host with `invalid_configuration`. FluidSynth ignores
+these VST-only settings. The selected mode/wait are reported by
+`instruments_list` and successful `audio_status.audio`; MCP callers cannot choose
+worker arguments, module paths or host configuration.
+
+The startup wait pumps Windows messages without processing silent blocks and
+adds no time to the WAV. Job timeout includes that wait separately from the
+render limit and 30-second safety margin. A render can be cancelled during
+startup or processing. For EZkeys external-MIDI rendering, save the instrument
+preset with **Follow Host off** to prevent its internal Song Track playing too.
+
 Audio rendering uses the one active host backend. A track may omit its
 instrument object, use an empty object, or name the matching `backend`.
 Other track instrument settings are rejected. FluidSynth chooses sounds via

@@ -5,6 +5,7 @@ from pathlib import Path
 import subprocess
 import sys
 from tempfile import TemporaryDirectory
+from time import monotonic
 import wave
 
 
@@ -53,7 +54,7 @@ def main(worker, cli, plugin):
         output = folder / "ピアノ.wav"
         args = worker, "--plugin", plugin, "--class-id", piano["id"], "--midi", target_midi
         report = invoke(*args, "--output", output)
-        assert report["backend"] == "vst3" and report["peak"] > 0.01, report
+        assert report["backend"] == "vst3" and report["process_mode"] == "offline" and report["peak"] > 0.01, report
         with wave.open(str(output), "rb") as audio:
             assert (audio.getnchannels(), audio.getsampwidth(), audio.getframerate()) == (2, 2, 48000)
             # 4 beats at 0.5s + 4 beats at 0.6s + the two-second tail.
@@ -64,11 +65,20 @@ def main(worker, cli, plugin):
         invoke(*args, "--output", output, expected_error="OUTPUT_EXISTS")
         assert hashlib.sha256(output.read_bytes()).digest() == original_wav
         invoke(*args, "--output", folder / "limit.wav", "--max-seconds", "2", expected_error="DURATION_LIMIT")
+        invoke(*args, "--output", folder / "limit.wav", "--warmup-ms", "30001", expected_error="INVALID_ARGUMENT")
         bad_preset = folder / "bad.vstpreset"
         bad_preset.write_bytes(b"bad preset")
         invoke(*args, "--output", folder / "bad.wav", "--preset", bad_preset, expected_error="INVALID_PRESET")
         assert {p.name for p in folder.iterdir()} == {output.name, target_midi.name, bad_preset.name}
-    print(f'{piano["name"]}: real VST audio, 307200 frames, peak={report["peak"]:.4f}; MIDI unchanged')
+        paced = folder / "realtime.wav"
+        started = monotonic()
+        realtime = invoke(*args, "--realtime", "--warmup-ms", "300", "--output", paced)
+        assert monotonic() - started >= 6.6, realtime
+        assert realtime["process_mode"] == "realtime" and realtime["peak"] > 0.01, realtime
+        with wave.open(str(paced), "rb") as audio:
+            assert audio.getnframes() == 307200
+            assert any(audio.readframes(48000)), "Startup wait must not shift the MIDI in the WAV."
+    print(f'{piano["name"]}: offline and real-time-paced VST audio, 307200 frames, peak={report["peak"]:.4f}; MIDI unchanged')
 
 
 if __name__ == "__main__":

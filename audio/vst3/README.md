@@ -6,6 +6,43 @@ part with Cantabile's existing MIDI codec and renders the selected instrument to
 open the WAV and MIDI at the same position, route MIDI to the original instrument,
 and continue editing notes, timing and velocity.
 
+## Updating on Windows without manually downloading ZIPs
+
+Use [CantabileClient-Update.cmd](CantabileClient-Update.cmd), the existing
+GitHub CLI update launcher. Copy it to a permanent, writable parent folder,
+outside any versioned `CantabileClient-<run-id>` folder.
+
+Install GitHub CLI first, then check authentication under your normal Windows
+account in PowerShell:
+
+```powershell
+gh auth status
+# If not authenticated:
+gh auth login
+```
+
+Double-click `CantabileClient-Update.cmd`. It selects the latest successful
+**push to main** run of `cantabile-client.yml` and downloads the
+`CantabileClient-win-x64` artifact next to the launcher. PR builds and failed or
+unfinished main builds are excluded. After a PR is merged, wait for the main
+Windows workflow to succeed before running the launcher to obtain that change.
+
+- Each build is extracted into `CantabileClient-<run-id>`. A `.complete` marker
+  skips a repeated download after the executable has been found.
+- `CantabileClient-current.txt` records the selected folder.
+- If discovery/download fails (including an expired artifact), the launcher
+  tries the recorded installation, or the sibling `CantabileClient` folder.
+  Check the displayed folder/build ID: fallback can launch an older version.
+- It opens PowerShell in the selected folder and prints `cantabile-client
+  --help`. It does **not** start the MCP host or restore `$plugin`/`$data` from
+  another shell. Configure those variables in the new shell when needed.
+
+Keep MIDI, WAV, presets and private connector credentials in a separate data
+folder. Switching version folders does not migrate files or running processes;
+restart an existing MCP host explicitly with the new host executable and the
+same intended workspace/settings. The launcher is a preview-artifact updater,
+not a published-release installer.
+
 ## Windows quick start
 
 1. Open the instrument in Cubase, select the sound, then choose **Save Preset**
@@ -28,6 +65,29 @@ If a module lists several instruments, pass `--class-id` with the ID from
 `list`. Without `--preset`, the worker uses the plugin's default state.
 The output path must be new. A successful render prints JSON with the sample
 rate, duration, peak and clipped-sample count.
+
+If a sample instrument returns `SILENT_AUDIO`, try adding
+`--realtime --warmup-ms 5000`. This requests VST real-time processing,
+paces blocks to the sample clock, and lets the instrument prepare for five
+seconds before the first note. The startup wait adds no frames to the WAV.
+Either flag can be used on its own to test processing speed or startup time.
+The default CLI and MCP render path remains offline; MCP hosts can opt in using
+the settings below. The startup wait pumps Windows messages; it does not process
+silent audio blocks before MIDI begins.
+
+### EZkeys 2: avoid simultaneous song-track playback
+
+When rendering an external MIDI file, turn **Follow Host off** in EZkeys and
+save a new Cubase `.vstpreset` with that setting. Otherwise MIDI stored in the
+instrument's own Song Track can play along with the external part, producing
+unexpected notes, note lengths or an apparent cutoff when the external part ends.
+Keep the original preset if it is also used for songwriting.
+
+On 2026-11-20, an operator confirmed sustained notes from the original Cubase
+MIDI with this saved setting and `--realtime --warmup-ms 5000`, without adding
+leading silence to the MIDI. This confirms that CLI configuration for one
+workstation/preset; it is not acceptance of other instruments or Windows Hub
+rendering. The two-second release tail can leave some silence at the end.
 
 In Cubase, import the `.mid` as a MIDI part and assign the same instrument and
 preset. For placement, align MIDI and WAV to the same bar. When working in an
@@ -52,6 +112,9 @@ $env:CANTABILE_RENDERER = (Resolve-Path '.\bin\cantabile-client.exe').Path
 $env:CANTABILE_VST3_MODULE = $plugin
 $env:CANTABILE_VST3_PRESET = (Resolve-Path '.\Studio Piano.vstpreset').Path
 # For a module exposing multiple instruments, set CANTABILE_VST3_CLASS_ID.
+# For EZkeys 2, use the saved Follow Host OFF preset and these optional settings:
+$env:CANTABILE_VST3_REALTIME = 'true'
+$env:CANTABILE_VST3_WARMUP_MS = '5000'
 .\host\cantabile-host.exe stdio --workspace '.\workspace' --permission edit
 ```
 
@@ -63,6 +126,26 @@ The Hub routes `midi_import`, `audio_render`, `audio_status`, `midi_export` and
 settings. The MCP interface accepts MIDI and the usual revision guard.
 Local `instruments_list` reports configuration availability. A successful render
 through `audio_status` verifies that a particular instrument actually played.
+
+`CANTABILE_VST3_REALTIME` accepts `true`/`false` (case-insensitive) or `1`/`0`;
+`CANTABILE_VST3_WARMUP_MS` accepts an integer from 0 to 30000. Unset/empty values
+default to offline/zero wait. Invalid values stop a VST-configured host with
+`invalid_configuration`. These trusted host settings apply to stdio and Hub
+jobs and cannot be changed by an MCP caller. Restart the host after changing
+them. FluidSynth does not use these VST settings.
+
+`instruments_list` and successful `audio_status.audio` report `process_mode` and
+`warmup_ms`. Confirm `vst3`, `realtime` and `5000` on the Windows connection before
+testing the original MIDI. The job wall-clock budget includes the startup wait
+in addition to the render limit and normal safety margin. The wait adds no WAV
+frames or leading silence.
+
+For a PC connected through Hub, use a separately provisioned Windows upstream
+and its private credential file; retain an existing Linux/SoundFont connection.
+With the same environment settings, launch the host's `serve` command as described
+in the host guide. Keep that host running under the account with the instrument
+and sample licenses. Until it connects and returns a real WAV through MCP, CLI
+acceptance alone does not establish remote availability.
 
 ## Build and verify
 
