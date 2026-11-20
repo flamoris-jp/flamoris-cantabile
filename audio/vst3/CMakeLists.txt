@@ -10,6 +10,10 @@ set(SMTG_ENABLE_VST3_PLUGIN_EXAMPLES ${CANTABILE_VST3_TEST_PLUGIN} CACHE BOOL ""
 set(SMTG_CREATE_PLUGIN_LINK OFF CACHE BOOL "" FORCE)
 set(SMTG_RUN_VST_VALIDATOR OFF CACHE BOOL "" FORCE)
 add_subdirectory("${CANTABILE_VST3_SDK}" vst3-sdk EXCLUDE_FROM_ALL)
+if(CANTABILE_VST3_TEST_PLUGIN)
+    add_custom_target(cantabile-vst3-test-plugin)
+    add_dependencies(cantabile-vst3-test-plugin mda-vst3)
+endif()
 
 set(host "${CANTABILE_VST3_SDK}/public.sdk/source/vst/hosting")
 if(WIN32)

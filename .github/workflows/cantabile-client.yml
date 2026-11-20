@@ -28,7 +28,7 @@ jobs:
           $headers = python -c "import nlohmann_json; print(nlohmann_json.get_include())"
           cmake -S . -B build-vst -G "Visual Studio 17 2022" -A x64 "-DJSON_INCLUDE_DIR=$headers" "-DCANTABILE_VST3_SDK=$env:RUNNER_TEMP/vst3sdk" -DCANTABILE_VST3_TEST_PLUGIN=ON
           if ($LASTEXITCODE) { exit $LASTEXITCODE }
-          cmake --build build-vst --config Release --parallel 2 --target cantabile-client cantabile-cli cantabile-render mda-vst3
+          cmake --build build-vst --config Release --parallel 2 --target cantabile-client cantabile-cli cantabile-render cantabile-vst3-test-plugin
       - name: Build existing MCP host
         run: dotnet build host/Flamoris.Cantabile.Host.csproj -c Release
       - name: Render on Windows and retrieve WAV and MIDI through MCP

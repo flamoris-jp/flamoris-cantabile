@@ -79,7 +79,7 @@ through `audio_status` verifies that a particular instrument actually played.
 The Windows workflow builds the CLI and managed host, tests rendering and
 MCP round trips with the SDK's mda Piano, and uploads `CantabileClient-win-x64`.
 The same native smoke test can run on Linux x64 with
-`-DCANTABILE_VST3_TEST_PLUGIN=ON`, the `mda-vst3` target, and
+`-DCANTABILE_VST3_TEST_PLUGIN=ON`, the `cantabile-vst3-test-plugin` target, and
 `audio/vst3/tests/smoke.py`.
 
 ## Preview scope
