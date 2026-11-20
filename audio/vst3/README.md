@@ -29,6 +29,13 @@ If a module lists several instruments, pass `--class-id` with the ID from
 The output path must be new. A successful render prints JSON with the sample
 rate, duration, peak and clipped-sample count.
 
+If a sample instrument returns `SILENT_AUDIO`, try adding
+`--realtime --warmup-ms 5000`. This requests VST real-time processing,
+paces blocks to the sample clock, and lets the instrument prepare for five
+seconds before the first note. The startup wait adds no frames to the WAV.
+Either flag can be used on its own to test processing speed or startup time.
+The default CLI and MCP render path remains offline.
+
 In Cubase, import the `.mid` as a MIDI part and assign the same instrument and
 preset. For placement, align MIDI and WAV to the same bar. When working in an
 existing project, Cubase can keep that project's tempo map on MIDI import. The

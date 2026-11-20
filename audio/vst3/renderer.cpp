@@ -14,16 +14,19 @@
 #include <algorithm>
 #include <array>
 #include <charconv>
+#include <chrono>
 #include <cmath>
 #include <fstream>
 #include <iostream>
 #include <optional>
+#include <thread>
 
 #ifdef _WIN32
 #ifndef NOMINMAX
 #define NOMINMAX
 #endif
 #include <objbase.h>
+#include <windows.h>
 #endif
 
 namespace {
@@ -39,6 +42,26 @@ using nlohmann::json;
 constexpr int sample_rate = 48000;
 constexpr int block_size = 512;
 constexpr int tail_frames = sample_rate * 2;
+using Clock = std::chrono::steady_clock;
+
+void wait_until(Clock::time_point deadline) {
+#ifdef _WIN32
+    for (auto now = Clock::now(); now < deadline; now = Clock::now()) {
+        const auto delay = std::chrono::ceil<std::chrono::milliseconds>(deadline - now).count();
+        const auto result = MsgWaitForMultipleObjectsEx(0, nullptr, static_cast<DWORD>(delay),
+                                                       QS_ALLINPUT, MWMO_INPUTAVAILABLE);
+        if (result == WAIT_FAILED) fail("VST_PROCESS_FAILED", "Cannot wait for Windows plugin messages");
+        if (result != WAIT_OBJECT_0) continue;
+        MSG message{};
+        if (!PeekMessageW(&message, nullptr, 0, 0, PM_REMOVE)) continue;
+        if (message.message == WM_QUIT) fail("VST_PROCESS_FAILED", "Plugin requested shutdown");
+        TranslateMessage(&message);
+        DispatchMessageW(&message);
+    }
+#else
+    std::this_thread::sleep_until(deadline);
+#endif
+}
 
 std::string utf8(const fs::path& path) {
     auto bytes = path.u8string();
@@ -49,29 +72,41 @@ struct Options {
     fs::path plugin, preset, midi, output;
     std::string class_id;
     int max_seconds = 600;
-    bool list = false;
+    int warmup_ms = 0;
+    bool list = false, realtime = false;
 };
+
+int bounded_integer(const fs::path& value, const std::string& flag, int minimum, int maximum) {
+    const auto text = utf8(value);
+    int number;
+    const auto result = std::from_chars(text.data(), text.data() + text.size(), number);
+    if (result.ec != std::errc{} || result.ptr != text.data() + text.size() ||
+        number < minimum || number > maximum)
+        fail("INVALID_ARGUMENT", flag + " must be an integer from " + std::to_string(minimum) +
+             " to " + std::to_string(maximum));
+    return number;
+}
 
 template<typename Char>
 Options parse(int argc, Char** argv) {
     Options options;
     options.list = argc > 1 && fs::path(argv[1]) == "list";
-    for (int i = options.list ? 2 : 1; i < argc; i += 2) {
+    for (int i = options.list ? 2 : 1; i < argc; ++i) {
         const auto flag = utf8(argv[i]);
-        if (i + 1 >= argc) fail("INVALID_ARGUMENT", "Missing value for " + flag);
-        const fs::path value = argv[i + 1];
+        if (flag == "--realtime" && !options.list) {
+            options.realtime = true;
+            continue;
+        }
+        if (++i >= argc) fail("INVALID_ARGUMENT", "Missing value for " + flag);
+        const fs::path value = argv[i];
         if (flag == "--plugin") options.plugin = value;
         else if (flag == "--class-id" && !options.list) options.class_id = utf8(value);
         else if (flag == "--preset" && !options.list) options.preset = value;
         else if (flag == "--midi" && !options.list) options.midi = value;
         else if (flag == "--output" && !options.list) options.output = value;
-        else if (flag == "--max-seconds" && !options.list) {
-            const auto text = utf8(value);
-            const auto result = std::from_chars(text.data(), text.data() + text.size(), options.max_seconds);
-            if (result.ec != std::errc{} || result.ptr != text.data() + text.size() ||
-                options.max_seconds < 1 || options.max_seconds > 600)
-                fail("INVALID_ARGUMENT", "max-seconds must be an integer from 1 to 600");
-        } else fail("INVALID_ARGUMENT", "Unknown option: " + flag);
+        else if (flag == "--max-seconds" && !options.list) options.max_seconds = bounded_integer(value, flag, 1, 600);
+        else if (flag == "--warmup-ms" && !options.list) options.warmup_ms = bounded_integer(value, flag, 0, 30000);
+        else fail("INVALID_ARGUMENT", "Unknown option: " + flag);
     }
     if (options.plugin.empty() || (!options.list && (options.midi.empty() || options.output.empty())))
         fail("INVALID_ARGUMENT", "--plugin is required, and rendering also requires --midi and --output");
@@ -280,14 +315,16 @@ json render(const Options& options, const Score& score, PlugProvider& provider) 
     for (int32 i = 1; i < output_count; ++i) component->activateBus(kAudio, kOutput, i, false);
     check(component->activateBus(kAudio, kOutput, 0, true), "Cannot activate main output");
     check(component->activateBus(kEvent, kInput, 0, true), "Cannot activate MIDI input");
-    ProcessSetup setup{kOffline, kSample32, block_size, sample_rate};
-    check(processor->setupProcessing(setup), "VST instrument rejected offline processing");
+    const auto mode = options.realtime ? kRealtime : kOffline;
+    ProcessSetup setup{mode, kSample32, block_size, sample_rate};
+    check(processor->setupProcessing(setup), "VST instrument rejected the selected processing mode");
     Activation activation{*component, *processor};
     check(component->setActive(true), "Cannot start VST instrument");
     activation.active = true;
     const auto processing = processor->setProcessing(true);
     if (processing != kNotImplemented) check(processing, "Cannot start VST processing");
     activation.processing = processing == kResultOk;
+    if (options.warmup_ms) wait_until(Clock::now() + std::chrono::milliseconds(options.warmup_ms));
     const auto latency = processor->getLatencySamples();
     if (latency > static_cast<uint32>(tail_frames))
         fail("VST_UNSUPPORTED", "Plugin latency exceeds two seconds");
@@ -307,7 +344,7 @@ json render(const Options& options, const Score& score, PlugProvider& provider) 
                     ProcessContext::kContTimeValid;
     context.sampleRate = sample_rate;
     ProcessData process;
-    process.processMode = kOffline;
+    process.processMode = mode;
     process.symbolicSampleSize = kSample32;
     process.numInputs = input_count;
     process.numOutputs = output_count;
@@ -322,7 +359,12 @@ json render(const Options& options, const Score& score, PlugProvider& provider) 
     std::size_t next = 0, timing_index = 0;
     const auto end = score.frames + latency;
     std::array<unsigned char, block_size * 4> pcm{};
+    const auto start = Clock::now();
     for (std::int64_t position = 0; position < end;) {
+        if (options.realtime) {
+            const auto offset = std::chrono::duration<double>(static_cast<double>(position) / sample_rate);
+            wait_until(start + std::chrono::duration_cast<Clock::duration>(offset));
+        }
         while (timing_index + 1 < score.timings.size() &&
                score.timings[timing_index + 1].frame <= position) ++timing_index;
         const auto& timing = score.timings[timing_index];
@@ -363,6 +405,7 @@ json render(const Options& options, const Score& score, PlugProvider& provider) 
     if (peak < 0.5 / 32767) fail("SILENT_AUDIO", "VST produced no audible PCM; check its preset and samples");
     wave.publish();
     return {{"ok", true}, {"backend", "vst3"}, {"sample_rate", sample_rate},
+            {"process_mode", options.realtime ? "realtime" : "offline"},
             {"channels", 2}, {"sample_format", "pcm_s16le"}, {"frames", score.frames},
             {"duration_seconds", static_cast<double>(score.frames) / sample_rate},
             {"peak", peak}, {"clipped_samples", clipped}};
@@ -408,7 +451,8 @@ int main_for(int argc, Char** argv) {
         if (argc == 1 || (argc == 2 && fs::path(argv[1]) == "--help")) {
             std::cout << "cantabile-client list --plugin PATH.vst3\n"
                          "cantabile-client --plugin PATH.vst3 [--class-id ID] [--preset FILE.vstpreset]\n"
-                         "                 --midi PART.mid --output OUT.wav [--max-seconds 600]\n";
+                         "                 --midi PART.mid --output OUT.wav [--max-seconds 600]\n"
+                         "                 [--realtime] [--warmup-ms 0]\n";
             return 0;
         }
         std::cout << run(parse(argc, argv)).dump(-1, ' ', false, json::error_handler_t::replace) << '\n';
