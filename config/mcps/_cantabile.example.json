@@ -748,7 +748,7 @@
     },
     {
       "name": "instruments_list",
-      "description": "Report the configured offline render backend and its availability.",
+      "description": "Report the configured render backend, processing mode, startup wait and availability.",
       "input_schema": {
         "type": "object",
         "properties": {
@@ -797,7 +797,7 @@
     },
     {
       "name": "audio_render",
-      "description": "Snapshot the current project to a bounded offline WAV job using the host-configured backend.",
+      "description": "Snapshot the current project to a bounded WAV job using the host-configured backend and processing mode.",
       "input_schema": {
         "type": "object",
         "properties": {

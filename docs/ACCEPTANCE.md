@@ -1,8 +1,39 @@
 # Cantabile acceptance / 検証記録
 
-Status checked 2026-11-11 (JST): public v0.1.0 preview. Source tests, published
+Published-release status checked 2026-11-11 (JST): public v0.1.0 preview. Source tests, published
 distribution, one deployment's live operations, human playback and model listening
 are distinct evidence levels.
+
+## 2026-11-20: CantabileClient development CLI and MCP
+
+- The workstation operator confirmed sustained notes from the original Cubase
+  MIDI using EZkeys 2, a saved `.vstpreset` with Follow Host OFF, and
+  `--realtime --warmup-ms 5000`. No leading silence was added to that original
+  MIDI. The operator accepted a short trailing silence.
+- Received WAV measurements: stereo PCM16, 48000 Hz, 754286 frames
+  (15.7142917 seconds), SHA-256
+  `ea797b95d79d3eac0225132b3907cc88e3c445da52aae55dc0c54b22ab8d857b`.
+  These are file measurements plus operator listening, not model listening.
+  No commercial preset, source MIDI or audio is committed.
+- The development MCP host accepts trusted `CANTABILE_VST3_REALTIME` and
+  `CANTABILE_VST3_WARMUP_MS` configuration. Default offline/zero-wait behavior
+  remains. Instrument queries and completed-job audio report the selected mode
+  and wait. VST startup wait is included separately in the job timeout budget.
+- Local .NET 10 Release build passed with zero warnings/errors; all six existing
+  real MCP host integration tests passed. The VST MCP smoke test used the SDK
+  mda Piano through the actual stdio/Core/native/worker path in both default
+  offline and configured realtime modes. WAV bytes were identical (307200 stereo
+  PCM frames), imported/exported MIDI was exact, and the paced case took at least
+  6.6 seconds with a 300 ms wait without shifting the first note.
+- Five valid setting combinations and ten invalid startup configurations were
+  checked. Cancellation during a 30-second startup wait terminated promptly and
+  published no WAV. Caller-supplied processing options were rejected; they remain
+  host-owned settings. The static Hub catalog was regenerated from the host.
+- Native CLI/worker binaries used locally match the unchanged PR #7 native
+  source. Windows CI and commercial-instrument MCP/Hub acceptance are distinct
+  checks. At this stage the live Hub connection still reports the published
+  FluidSynth backend; a separately provisioned Windows connection and a real
+  EZkeys MCP render remain pending. This update does not deploy or replace it.
 
 ## Published release and CI
 
@@ -116,3 +147,4 @@ had no Docker. Its official-SDK stdio checks therefore did not certify Hub WSS,
 loopback health or Docker behavior. Later GitHub CI, release and bounded deployment
 checks above supplied separate evidence; no local restriction was disabled.
 Human playback does not establish that the AI received or heard the audio.
+

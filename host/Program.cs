@@ -18,6 +18,7 @@ public static class Program
                 serve --workspace DIRECTORY --hub-endpoint wss://HOST/desktop/UPSTREAM --credential-file PRIVATE_FILE [--permission edit|readOnly] [--health-port 8774]
                 catalog --workspace DIRECTORY
                 Environment: CANTABILE_CORE_LIBRARY (native library), CANTABILE_RENDERER (renderer executable), CANTABILE_SOUNDFONT (configured SoundFont).
+                VST: CANTABILE_VST3_MODULE, CANTABILE_VST3_PRESET, CANTABILE_VST3_CLASS_ID, CANTABILE_VST3_REALTIME (true|false|1|0), CANTABILE_VST3_WARMUP_MS (0..30000).
                 Changes stay in memory until project_save; saved projects and completed exports survive compatible restarts.
                 """); return 0;
         }

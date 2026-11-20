@@ -13,11 +13,31 @@ public sealed class RenderJobs : IAsyncDisposable
     private readonly string? vstModule = Environment.GetEnvironmentVariable("CANTABILE_VST3_MODULE");
     private readonly string? vstPreset = Environment.GetEnvironmentVariable("CANTABILE_VST3_PRESET");
     private readonly string? vstClass = Environment.GetEnvironmentVariable("CANTABILE_VST3_CLASS_ID");
+    private readonly bool vstRealtime;
+    private readonly int vstWarmupMs;
     private readonly Dictionary<string, Job> jobs = new(StringComparer.Ordinal);
     private readonly object gate = new();
     private bool disposed;
-    public RenderJobs(Workspace workspace) => this.workspace = workspace;
+    public RenderJobs(Workspace workspace)
+    {
+        this.workspace = workspace;
+        if (Backend == "vst3")
+        {
+            vstRealtime = Environment.GetEnvironmentVariable("CANTABILE_VST3_REALTIME")?.ToLowerInvariant() switch
+            {
+                null or "" or "false" or "0" => false,
+                "true" or "1" => true,
+                _ => throw new ArgumentException("Invalid VST real-time setting.")
+            };
+            var value = Environment.GetEnvironmentVariable("CANTABILE_VST3_WARMUP_MS");
+            if (!string.IsNullOrEmpty(value) &&
+                (!int.TryParse(value, System.Globalization.NumberStyles.None,
+                    System.Globalization.CultureInfo.InvariantCulture, out vstWarmupMs) || vstWarmupMs > 30000))
+                throw new ArgumentException("Invalid VST startup wait.");
+        }
+    }
     public string Backend => string.IsNullOrEmpty(vstModule) ? "fluidsynth" : "vst3";
+    private string ProcessMode => Backend == "vst3" && vstRealtime ? "realtime" : "offline";
     public object Instruments() => new
     {
         backends = new object[]
@@ -28,6 +48,8 @@ public sealed class RenderJobs : IAsyncDisposable
                   instrument_selection = "one host-configured VST 3 instrument and preset" }
         },
         active_backend = Backend,
+        process_mode = ProcessMode,
+        warmup_ms = vstWarmupMs,
         vst3 = Backend == "vst3" && Available ? "configured" : "unavailable"
     };
     public bool Available => File.Exists(renderer) && (Backend == "fluidsynth"
@@ -85,6 +107,12 @@ public sealed class RenderJobs : IAsyncDisposable
                 args.Add("--plugin"); args.Add(Path.GetFullPath(vstModule!));
                 if (!string.IsNullOrEmpty(vstPreset)) { args.Add("--preset"); args.Add(Path.GetFullPath(vstPreset)); }
                 if (!string.IsNullOrEmpty(vstClass)) { args.Add("--class-id"); args.Add(vstClass); }
+                if (vstRealtime) args.Add("--realtime");
+                if (vstWarmupMs != 0)
+                {
+                    args.Add("--warmup-ms");
+                    args.Add(vstWarmupMs.ToString(System.Globalization.CultureInfo.InvariantCulture));
+                }
             }
             else
             {
@@ -103,7 +131,7 @@ public sealed class RenderJobs : IAsyncDisposable
             inherited.Clear(); foreach (var pair in safeEnvironment) inherited[pair.Key] = pair.Value;
             if (!process.Start()) throw new McpFault("render_start_failed");
             using var lifetime = CancellationTokenSource.CreateLinkedTokenSource(job.Cancellation.Token);
-            lifetime.CancelAfter(TimeSpan.FromSeconds(maximumSeconds + 30));
+            lifetime.CancelAfter(TimeSpan.FromSeconds(maximumSeconds + 30) + TimeSpan.FromMilliseconds(vstWarmupMs));
             Task<string> stdout = ReadTextAsync(process.StandardOutput, 16384, lifetime.Token);
             Task<string> stderr = ReadTextAsync(process.StandardError, 16384, lifetime.Token);
             try
@@ -121,8 +149,11 @@ public sealed class RenderJobs : IAsyncDisposable
             if (process.ExitCode != 0 || !result.RootElement.TryGetProperty("ok", out var ok) || !ok.GetBoolean()) throw new McpFault("render_failed");
             var audio = result.RootElement;
             if (audio.GetProperty("backend").GetString() != Backend) throw new McpFault("render_failed");
+            if (Backend == "vst3" && audio.GetProperty("process_mode").GetString() != ProcessMode)
+                throw new McpFault("render_failed");
             // Retain curated measurements only, not the renderer's filesystem paths.
-            var measurements = JsonSerializer.SerializeToElement(new { backend = Backend, duration_seconds = audio.GetProperty("duration_seconds").GetDouble(),
+            var measurements = JsonSerializer.SerializeToElement(new { backend = Backend, process_mode = ProcessMode, warmup_ms = vstWarmupMs,
+                duration_seconds = audio.GetProperty("duration_seconds").GetDouble(),
                 sample_rate = audio.GetProperty("sample_rate").GetInt32(), channels = audio.GetProperty("channels").GetInt32(),
                 frames = audio.GetProperty("frames").GetInt64(), peak = audio.GetProperty("peak").GetDouble(), clipped_samples = audio.GetProperty("clipped_samples").GetInt64() });
             lock (gate)

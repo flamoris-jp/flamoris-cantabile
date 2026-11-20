@@ -13,6 +13,12 @@ installed instrument and can render a MIDI part through CLI or MCP. Keep the
 exported MIDI to edit in Cubase. See the [Windows preview guide](audio/vst3/README.md)
 for preset setup and supported scope.
 
+The development host can also select paced VST rendering and startup wait through
+`CANTABILE_VST3_REALTIME` / `CANTABILE_VST3_WARMUP_MS`. An EZkeys 2 workstation
+CLI test was accepted with the original Cubase MIDI, a saved Follow Host OFF
+preset, real-time processing and a 5000 ms startup wait. Commercial-instrument
+MCP/Hub acceptance remains a separate workstation check.
+
 ## What it is / 何者か
 
 Cantabile owns its music project, native typed edits and Undo/Redo, MIDI import/export, project persistence, and offline render jobs. CLI and MCP operate the same C++20 core through a small C ABI. The .NET 10 host reuses FLAMORIS MCP Core and Logging.

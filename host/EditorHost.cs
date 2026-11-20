@@ -138,9 +138,9 @@ public sealed class EditorHost : IMcpHost, IAsyncDisposable
         yield return new HostTool<JsonElement>("file_release", "Permanently release one exported artifact and its metadata to reclaim the bounded export quota. Never deletes projects.",
             Schema(new { file_id = new { type = "string", maxLength = 32 } }, ["file_id"]), OperationKind.Mutation,
             x => { Decode(x, "file_id"); _ = Text(x, "file_id", 32); return x; }, (ctx, x, _) => ctx.CommitAsync(() => workspace.ReleaseArtifact(Text(x, "file_id", 32))));
-        yield return new HostTool<JsonElement>("instruments_list", "Report the configured offline render backend and its availability.", EmptySchema,
+        yield return new HostTool<JsonElement>("instruments_list", "Report the configured render backend, processing mode, startup wait and availability.", EmptySchema,
             OperationKind.Query, x => Decode(x), (ctx, _, _) => ctx.ReadAsync(() => JsonSerializer.SerializeToElement(Renders.Instruments())), foreground: false);
-        yield return new HostTool<JsonElement>("audio_render", "Snapshot the current project to a bounded offline WAV job using the host-configured backend.",
+        yield return new HostTool<JsonElement>("audio_render", "Snapshot the current project to a bounded WAV job using the host-configured backend and processing mode.",
             Schema(new { max_seconds = new { type = "integer", minimum = 1, maximum = 600 } }), OperationKind.Transaction, x => Decode(x, "max_seconds"),
             (ctx, x, _) => ctx.CommitAsync(() => {
                 var project = Get().GetProperty("project");
