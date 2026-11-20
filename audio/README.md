@@ -85,8 +85,8 @@ enforce a wall-clock timeout around every worker process.
   must be constructed by the host/editor before invoking it; audio trimming and
   per-track preset configuration are not silently inferred.
 
-**VST 3 hosting is not implemented in this slice.** `--backend vst3` returns
-`UNSUPPORTED_BACKEND`. FluidSynth is a SoundFont backend, not a VST plugin.
+This worker uses FluidSynth. For an installed VST 3 instrument, use the
+optional [CantabileClient worker](vst3/README.md).
 Linux actual rendering is tested. Windows/macOS runtime loading paths exist in
 the source but are not accepted as verified renderer platforms yet.
 

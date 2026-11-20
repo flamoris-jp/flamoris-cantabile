@@ -10,13 +10,30 @@ public sealed class RenderJobs : IAsyncDisposable
     private readonly Workspace workspace;
     private readonly string? renderer = Environment.GetEnvironmentVariable("CANTABILE_RENDERER");
     private readonly string? soundfont = Environment.GetEnvironmentVariable("CANTABILE_SOUNDFONT");
+    private readonly string? vstModule = Environment.GetEnvironmentVariable("CANTABILE_VST3_MODULE");
+    private readonly string? vstPreset = Environment.GetEnvironmentVariable("CANTABILE_VST3_PRESET");
+    private readonly string? vstClass = Environment.GetEnvironmentVariable("CANTABILE_VST3_CLASS_ID");
     private readonly Dictionary<string, Job> jobs = new(StringComparer.Ordinal);
     private readonly object gate = new();
     private bool disposed;
     public RenderJobs(Workspace workspace) => this.workspace = workspace;
-    public object Instruments() => new { backends = new[] { new { id = "fluidsynth", available = Available,
-        soundfont = "configured", instrument_selection = "MIDI bank/program events" } }, vst3 = "not_implemented" };
-    public bool Available => !string.IsNullOrEmpty(renderer) && File.Exists(renderer) && !string.IsNullOrEmpty(soundfont) && File.Exists(soundfont);
+    public string Backend => string.IsNullOrEmpty(vstModule) ? "fluidsynth" : "vst3";
+    public object Instruments() => new
+    {
+        backends = new object[]
+        {
+            new { id = "fluidsynth", available = Backend == "fluidsynth" && Available, soundfont = "configured",
+                  instrument_selection = "MIDI bank/program events" },
+            new { id = "vst3", available = Backend == "vst3" && Available,
+                  instrument_selection = "one host-configured VST 3 instrument and preset" }
+        },
+        active_backend = Backend,
+        vst3 = Backend == "vst3" && Available ? "configured" : "unavailable"
+    };
+    public bool Available => File.Exists(renderer) && (Backend == "fluidsynth"
+        ? File.Exists(soundfont)
+        : (File.Exists(vstModule) || Directory.Exists(vstModule)) &&
+          (string.IsNullOrEmpty(vstPreset) || File.Exists(vstPreset)));
     public JsonElement Begin(byte[] midi, long revision, int maximumSeconds)
     {
         if (maximumSeconds is < 1 or > 600) throw new McpFault("invalid_range");
@@ -60,11 +77,28 @@ public sealed class RenderJobs : IAsyncDisposable
             lock (gate) { job.Cancellation.Token.ThrowIfCancellationRequested(); job.State = "running"; }
             using var process = new Process { StartInfo = new ProcessStartInfo(Path.GetFullPath(renderer!)) { RedirectStandardOutput = true,
                 RedirectStandardError = true, UseShellExecute = false, CreateNoWindow = true } };
-            foreach (var arg in new[] { "--midi", input, "--soundfont", Path.GetFullPath(soundfont!), "--output", output,
-                "--max-seconds", maximumSeconds.ToString(System.Globalization.CultureInfo.InvariantCulture), "--backend", "fluidsynth" }) process.StartInfo.ArgumentList.Add(arg);
-            // Credentials are not inherited by third-party renderers.
+            var args = process.StartInfo.ArgumentList;
+            foreach (var arg in new[] { "--midi", input, "--output", output,
+                "--max-seconds", maximumSeconds.ToString(System.Globalization.CultureInfo.InvariantCulture) }) args.Add(arg);
+            if (Backend == "vst3")
+            {
+                args.Add("--plugin"); args.Add(Path.GetFullPath(vstModule!));
+                if (!string.IsNullOrEmpty(vstPreset)) { args.Add("--preset"); args.Add(Path.GetFullPath(vstPreset)); }
+                if (!string.IsNullOrEmpty(vstClass)) { args.Add("--class-id"); args.Add(vstClass); }
+            }
+            else
+            {
+                args.Add("--soundfont"); args.Add(Path.GetFullPath(soundfont!));
+                args.Add("--backend"); args.Add("fluidsynth");
+            }
+            // Only forward standard platform variables needed to locate installed VST content.
+            // Connector credentials and arbitrary environment values are never inherited.
             var inherited = process.StartInfo.Environment;
             string[] retained = ["PATH", "LD_LIBRARY_PATH", "SYSTEMROOT", "WINDIR", "TEMP", "TMP", "TMPDIR", "LANG", "LC_ALL"];
+            if (Backend == "vst3" && OperatingSystem.IsWindows())
+                retained = [..retained, "APPDATA", "LOCALAPPDATA", "USERPROFILE", "PROGRAMDATA", "PUBLIC",
+                    "PROGRAMFILES", "PROGRAMFILES(X86)", "PROGRAMW6432", "COMMONPROGRAMFILES", "COMMONPROGRAMFILES(X86)",
+                    "COMMONPROGRAMW6432", "SYSTEMDRIVE"];
             var safeEnvironment = inherited.Where(p => retained.Contains(p.Key, StringComparer.OrdinalIgnoreCase)).ToArray();
             inherited.Clear(); foreach (var pair in safeEnvironment) inherited[pair.Key] = pair.Value;
             if (!process.Start()) throw new McpFault("render_start_failed");
@@ -86,8 +120,9 @@ public sealed class RenderJobs : IAsyncDisposable
             using var result = JsonDocument.Parse(await stdout, new() { MaxDepth = 16 });
             if (process.ExitCode != 0 || !result.RootElement.TryGetProperty("ok", out var ok) || !ok.GetBoolean()) throw new McpFault("render_failed");
             var audio = result.RootElement;
+            if (audio.GetProperty("backend").GetString() != Backend) throw new McpFault("render_failed");
             // Retain curated measurements only, not the renderer's filesystem paths.
-            var measurements = JsonSerializer.SerializeToElement(new { duration_seconds = audio.GetProperty("duration_seconds").GetDouble(),
+            var measurements = JsonSerializer.SerializeToElement(new { backend = Backend, duration_seconds = audio.GetProperty("duration_seconds").GetDouble(),
                 sample_rate = audio.GetProperty("sample_rate").GetInt32(), channels = audio.GetProperty("channels").GetInt32(),
                 frames = audio.GetProperty("frames").GetInt64(), peak = audio.GetProperty("peak").GetDouble(), clipped_samples = audio.GetProperty("clipped_samples").GetInt64() });
             lock (gate)

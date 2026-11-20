@@ -50,3 +50,9 @@ endif()
 
 install(TARGETS cantabile_core cantabile-cli RUNTIME DESTINATION bin LIBRARY DESTINATION lib ARCHIVE DESTINATION lib)
 install(FILES include/cantabile/core.h DESTINATION include/cantabile)
+
+# The optional host builds against a separate, locally provided VST 3 SDK.
+set(CANTABILE_VST3_SDK "" CACHE PATH "Path to the Steinberg VST 3 SDK")
+if(CANTABILE_VST3_SDK)
+    add_subdirectory(audio/vst3)
+endif()

@@ -138,15 +138,15 @@ public sealed class EditorHost : IMcpHost, IAsyncDisposable
         yield return new HostTool<JsonElement>("file_release", "Permanently release one exported artifact and its metadata to reclaim the bounded export quota. Never deletes projects.",
             Schema(new { file_id = new { type = "string", maxLength = 32 } }, ["file_id"]), OperationKind.Mutation,
             x => { Decode(x, "file_id"); _ = Text(x, "file_id", 32); return x; }, (ctx, x, _) => ctx.CommitAsync(() => workspace.ReleaseArtifact(Text(x, "file_id", 32))));
-        yield return new HostTool<JsonElement>("instruments_list", "Report actually configured render backends. VST 3 is not implemented in this first slice.", EmptySchema,
+        yield return new HostTool<JsonElement>("instruments_list", "Report the configured offline render backend and its availability.", EmptySchema,
             OperationKind.Query, x => Decode(x), (ctx, _, _) => ctx.ReadAsync(() => JsonSerializer.SerializeToElement(Renders.Instruments())), foreground: false);
-        yield return new HostTool<JsonElement>("audio_render", "Snapshot the current project to a bounded offline FluidSynth WAV job. VST instrument requests fail explicitly.",
+        yield return new HostTool<JsonElement>("audio_render", "Snapshot the current project to a bounded offline WAV job using the host-configured backend.",
             Schema(new { max_seconds = new { type = "integer", minimum = 1, maximum = 600 } }), OperationKind.Transaction, x => Decode(x, "max_seconds"),
             (ctx, x, _) => ctx.CommitAsync(() => {
                 var project = Get().GetProperty("project");
                 foreach (var track in project.GetProperty("tracks").EnumerateArray())
                     if (track.TryGetProperty("instrument", out var instrument) && instrument.ValueKind == JsonValueKind.Object && instrument.TryGetProperty("backend", out var backend)
-                        && backend.GetString() != "fluidsynth") throw new McpFault("unsupported_instrument_backend");
+                        && backend.GetString() != Renders.Backend) throw new McpFault("unsupported_instrument_backend");
                 foreach (var track in project.GetProperty("tracks").EnumerateArray())
                     if (track.TryGetProperty("instrument", out var settings) && settings.ValueKind == JsonValueKind.Object && settings.EnumerateObject().Any(p => p.Name != "backend")) throw new McpFault("unsupported_instrument_settings");
                 return Renders.Begin(Midi(playback: true), engine.Revision, x.TryGetProperty("max_seconds", out var max) ? max.GetInt32() : 600);

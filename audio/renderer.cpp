@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 // Offline SoundFont renderer. No MIDI/audio device or GUI is created.
+#include "wave_file.hpp"
 #include <algorithm>
 #include <array>
 #include <cerrno>
@@ -26,14 +27,10 @@
 
 namespace fs = std::filesystem;
 namespace {
+using namespace cantabile::audio;
+
 volatile std::sig_atomic_t interrupted = 0;
 void signal_handler(int) { interrupted = 1; }
-
-struct Error : std::runtime_error {
-    std::string code;
-    Error(std::string c, const std::string& message) : std::runtime_error(message), code(std::move(c)) {}
-};
-[[noreturn]] void fail(const std::string& code, const std::string& message) { throw Error(code, message); }
 
 std::string quoted(const std::string& value) {
     std::string result = "\"";
@@ -280,63 +277,6 @@ struct Session {
         if (player) { api.player_stop(player); api.player_join(player); api.player_delete(player); }
         if (synth) api.synth_delete(synth);
         if (settings) api.settings_delete(settings);
-    }
-};
-
-struct WaveFile {
-    fs::path temporary, destination;
-    std::FILE* file = nullptr;
-    bool published = false;
-    explicit WaveFile(const fs::path& output) : destination(output) {
-        std::error_code ec;
-        if (fs::exists(output, ec)) fail("OUTPUT_EXISTS", "Output already exists");
-        auto parent = output.parent_path();
-        if (parent.empty()) parent = ".";
-        if (!fs::is_directory(parent, ec)) fail("OUTPUT_FAILED", "Output parent directory does not exist");
-        // The job-owning host knows this exact name and can remove it after
-        // a forced process kill. Exclusive creation never adopts another job's
-        // already-existing staging file.
-        temporary = output;
-        temporary += ".part";
-        file = std::fopen(temporary.string().c_str(), "wbx");
-        if (!file) fail("OUTPUT_FAILED", "Cannot create temporary audio file");
-#ifndef _WIN32
-        if (::fchmod(::fileno(file), S_IRUSR | S_IWUSR)) {
-            std::fclose(file); file = nullptr; fs::remove(temporary, ec);
-            fail("OUTPUT_FAILED", "Cannot restrict temporary audio permissions");
-        }
-#endif
-    }
-    ~WaveFile() {
-        if (file) std::fclose(file);
-        if (!published) { std::error_code ignored; fs::remove(temporary, ignored); }
-    }
-    void bytes(const void* data, std::size_t size) {
-        if (std::fwrite(data, 1, size, file) != size) fail("OUTPUT_FAILED", "Audio write failed");
-    }
-    void little(std::uint32_t value, unsigned count) {
-        unsigned char b[4];
-        for (unsigned i = 0; i < count; ++i) b[i] = static_cast<unsigned char>(value >> (8 * i));
-        bytes(b, count);
-    }
-    void header(std::uint32_t frames, int rate) {
-        auto data_size = frames * 4;
-        bytes("RIFF", 4); little(data_size + 36, 4); bytes("WAVEfmt ", 8);
-        little(16, 4); little(1, 2); little(2, 2); little(static_cast<std::uint32_t>(rate), 4);
-        little(static_cast<std::uint32_t>(rate * 4), 4); little(4, 2); little(16, 2);
-        bytes("data", 4); little(data_size, 4);
-    }
-    void publish() {
-        if (std::fflush(file) || std::ferror(file)) fail("OUTPUT_FAILED", "Cannot flush audio file");
-        auto handle = file; file = nullptr;
-        if (std::fclose(handle)) fail("OUTPUT_FAILED", "Cannot close audio file");
-        std::error_code ec;
-        // Same-directory hard-link creation is atomic and never overwrites an
-        // existing output, including one created after the initial existence check.
-        fs::create_hard_link(temporary, destination, ec);
-        if (ec) fail("OUTPUT_FAILED", "Cannot publish audio file without overwriting an existing output");
-        fs::remove(temporary, ec);
-        published = true;
     }
 };
 

@@ -30,7 +30,9 @@ Checkmarks describe source, not deployment. See [acceptance evidence](ACCEPTANCE
 
 ## Next implementation / 後続実装
 
-- [ ] Native VST 3 scan/load/render, plugin parameters and preset/state persistence.
+- [x] Optional CantabileClient worker for offline rendering of one VST 3 instrument, explicit module/class selection, preset loading, and existing MCP job integration.
+- [ ] Confirm installed commercial instruments and Cubase round trips on the Windows production workstation.
+- [ ] VST 3 discovery, multi-instrument projects, plugin parameter editing and state capture.
 - [ ] Verify selected free Linux VST 3 instruments headlessly inside Docker.
 - [ ] Phrase arrangement, splits/joins, track reorder/duplicate and more transforms.
 - [ ] Range rendering and separate stems.
