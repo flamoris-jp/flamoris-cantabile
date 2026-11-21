@@ -748,7 +748,7 @@
     },
     {
       "name": "instruments_list",
-      "description": "Report the configured render backend, processing mode, startup wait and availability.",
+      "description": "Read configured legacy backends and the installed VST3 catalog. Detection, load/inspection and audibility are separate; module paths remain private to this host.",
       "input_schema": {
         "type": "object",
         "properties": {
@@ -797,7 +797,7 @@
     },
     {
       "name": "audio_render",
-      "description": "Snapshot the current project to a bounded WAV job using the host-configured backend and processing mode.",
+      "description": "Snapshot the native project to an asynchronous job. Catalog assignments render aligned float32 stems and a float64-summed PCM16 mix; any active unassigned/missing instrument fails explicitly. Projects without catalog assignments retain the legacy backend.",
       "input_schema": {
         "type": "object",
         "properties": {
@@ -974,7 +974,12 @@
         "properties": {
           "input": {
             "type": "object",
-            "properties": {},
+            "properties": {
+              "track_id": {
+                "type": "string",
+                "maxLength": 128
+              }
+            },
             "required": [],
             "additionalProperties": false
           },
@@ -1026,6 +1031,10 @@
             "properties": {
               "script": {
                 "type": "object"
+              },
+              "track_id": {
+                "type": "string",
+                "maxLength": 128
               }
             },
             "required": [
@@ -1081,6 +1090,428 @@
             "properties": {
               "script": {
                 "type": "object"
+              },
+              "track_id": {
+                "type": "string",
+                "maxLength": 128
+              },
+              "files": {
+                "type": "object",
+                "maxProperties": 16,
+                "additionalProperties": {
+                  "type": "string",
+                  "pattern": "^[a-f0-9]{32}$"
+                }
+              }
+            },
+            "required": [
+              "script"
+            ],
+            "additionalProperties": false
+          },
+          "guard": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "runtimeId": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 128
+              },
+              "documentToken": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 128
+              },
+              "expectedRevision": {
+                "type": "string",
+                "pattern": "^(0|[1-9][0-9]*)$",
+                "maxLength": 19
+              }
+            },
+            "required": [
+              "runtimeId",
+              "documentToken",
+              "expectedRevision"
+            ]
+          }
+        },
+        "additionalProperties": false,
+        "required": [
+          "input",
+          "guard"
+        ]
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": true,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "vst_scan",
+      "description": "Start an asynchronous scan of standard VST3 locations and operator-registered CANTABILE_VST3_PATHS. One isolated worker per module/class; failures are retained. Poll vst_job_status.",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "input": {
+            "type": "object",
+            "properties": {},
+            "required": [],
+            "additionalProperties": false
+          },
+          "guard": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "runtimeId": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 128
+              },
+              "documentToken": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 128
+              },
+              "expectedRevision": {
+                "type": "string",
+                "pattern": "^(0|[1-9][0-9]*)$",
+                "maxLength": 19
+              }
+            },
+            "required": [
+              "runtimeId",
+              "documentToken",
+              "expectedRevision"
+            ]
+          }
+        },
+        "additionalProperties": false,
+        "required": [
+          "input",
+          "guard"
+        ]
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "vst_job_status",
+      "description": "Read a host-owned scan, script or multi-instrument job, including bounded rollback/audit failure summaries and immutable completed artifacts.",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "input": {
+            "type": "object",
+            "properties": {
+              "job_id": {
+                "type": "string",
+                "maxLength": 32
+              }
+            },
+            "required": [
+              "job_id"
+            ],
+            "additionalProperties": false
+          },
+          "guard": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "runtimeId": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 128
+              },
+              "documentToken": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 128
+              },
+              "expectedRevision": {
+                "type": "string",
+                "pattern": "^(0|[1-9][0-9]*)$",
+                "maxLength": 19
+              }
+            },
+            "required": [
+              "runtimeId",
+              "documentToken"
+            ]
+          }
+        },
+        "additionalProperties": false,
+        "required": [
+          "input"
+        ]
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "vst_job_cancel",
+      "description": "Cancel a host-owned scan, script or multi-instrument job. An isolated worker's rollback is unknown after a hard kill.",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "input": {
+            "type": "object",
+            "properties": {
+              "job_id": {
+                "type": "string",
+                "maxLength": 32
+              }
+            },
+            "required": [
+              "job_id"
+            ],
+            "additionalProperties": false
+          },
+          "guard": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "runtimeId": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 128
+              },
+              "documentToken": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 128
+              },
+              "expectedRevision": {
+                "type": "string",
+                "pattern": "^(0|[1-9][0-9]*)$",
+                "maxLength": 19
+              }
+            },
+            "required": [
+              "runtimeId",
+              "documentToken",
+              "expectedRevision"
+            ]
+          }
+        },
+        "additionalProperties": false,
+        "required": [
+          "input",
+          "guard"
+        ]
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": true,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "instrument_assign",
+      "description": "Assign a catalog VST3 to a MIDI track, resetting its previous sound state. Each track is an independent instance. Uses native Undo/Redo; no host restart.",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "input": {
+            "type": "object",
+            "properties": {
+              "track_id": {
+                "type": "string",
+                "maxLength": 128
+              },
+              "catalog_id": {
+                "type": "string",
+                "maxLength": 128
+              }
+            },
+            "required": [
+              "track_id",
+              "catalog_id"
+            ],
+            "additionalProperties": false
+          },
+          "guard": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "runtimeId": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 128
+              },
+              "documentToken": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 128
+              },
+              "expectedRevision": {
+                "type": "string",
+                "pattern": "^(0|[1-9][0-9]*)$",
+                "maxLength": 19
+              }
+            },
+            "required": [
+              "runtimeId",
+              "documentToken",
+              "expectedRevision"
+            ]
+          }
+        },
+        "additionalProperties": false,
+        "required": [
+          "input",
+          "guard"
+        ]
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": true,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "instrument_clear",
+      "description": "Remove a track's instrument assignment and stored state through native Undo/Redo.",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "input": {
+            "type": "object",
+            "properties": {
+              "track_id": {
+                "type": "string",
+                "maxLength": 128
+              }
+            },
+            "required": [
+              "track_id"
+            ],
+            "additionalProperties": false
+          },
+          "guard": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "runtimeId": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 128
+              },
+              "documentToken": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 128
+              },
+              "expectedRevision": {
+                "type": "string",
+                "pattern": "^(0|[1-9][0-9]*)$",
+                "maxLength": 19
+              }
+            },
+            "required": [
+              "runtimeId",
+              "documentToken",
+              "expectedRevision"
+            ]
+          }
+        },
+        "additionalProperties": false,
+        "required": [
+          "input",
+          "guard"
+        ]
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": true,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "instrument_state_set",
+      "description": "Copy a completed standard state artifact into the native track instance. Checks class identity; saved projects embed state (max 1 MiB/instance within project quota). The next async render applies it explicitly.",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "input": {
+            "type": "object",
+            "properties": {
+              "track_id": {
+                "type": "string",
+                "maxLength": 128
+              },
+              "file_id": {
+                "type": "string",
+                "maxLength": 32
+              }
+            },
+            "required": [
+              "track_id",
+              "file_id"
+            ],
+            "additionalProperties": false
+          },
+          "guard": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "runtimeId": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 128
+              },
+              "documentToken": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 128
+              },
+              "expectedRevision": {
+                "type": "string",
+                "pattern": "^(0|[1-9][0-9]*)$",
+                "maxLength": 19
+              }
+            },
+            "required": [
+              "runtimeId",
+              "documentToken",
+              "expectedRevision"
+            ]
+          }
+        },
+        "additionalProperties": false,
+        "required": [
+          "input",
+          "guard"
+        ]
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": true,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "vst_script_begin",
+      "description": "Start a bounded asynchronous write script on a track instance (or legacy configured instrument). Requires SCRIPT_WRITE opt-in. Poll vst_job_status for outputs or typed rollback/audit summary; use instrument_state_set to retain a saved state.",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "input": {
+            "type": "object",
+            "properties": {
+              "script": {
+                "type": "object"
+              },
+              "track_id": {
+                "type": "string",
+                "maxLength": 128
               },
               "files": {
                 "type": "object",

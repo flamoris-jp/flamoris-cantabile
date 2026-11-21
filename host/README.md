@@ -201,3 +201,24 @@ restart recovery, immutable file retrieval, and actual FluidSynth WAV rendering
 when the worker/SoundFont are available. `CANTABILE_DOTNET`,
 `CANTABILE_CORE_LIBRARY`, `CANTABILE_RENDERER`, and `CANTABILE_SOUNDFONT` can select
 locally built test dependencies. No live infrastructure is needed.
+
+## Catalog-backed VST3 project tools (development)
+
+The development catalog now has 28 tools including `mcp.context`. The published
+preview/deployed older catalogs retain their separately recorded counts. Regenerate
+and refresh the upstream tool catalog when updating a development host.
+
+`instruments_list.catalog` reads installed audio classes; `vst_scan` starts a
+bounded asynchronous scan of standard and operator-registered VST3 roots.
+`instrument_assign`, `instrument_clear` and `instrument_state_set` edit native
+track assignments and embedded standard state with ordinary revision guards and
+Undo/Redo. Optional `track_id` on Inspector/Script identifies an independent
+instance. Use `edit_batch` / `track.update` for volume, pan and render-channel
+settings. `vst_script_begin`, `vst_job_status` and `vst_job_cancel` detach long
+scripts from request deadlines and preserve typed failure summaries.
+
+Catalog-backed `audio_render` jobs return aligned float32 stems and a PCM16 mix
+under `result`; projects without catalog assignments retain the legacy response.
+See the [complete contract, quotas and workstation gate](../docs/VST3_PROJECTS.md)
+for exact fields, configuration, state-save workflow and compatibility. Source
+and test-plugin verification do not establish commercial band acceptance.

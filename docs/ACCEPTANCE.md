@@ -176,9 +176,10 @@ See the host/audio READMEs for environment variables.
 - Controlled production restart/recovery and live MIDI reimport.
 - Actual Cubase import and visual/playback acceptance.
 - Installed commercial VST 3 Inspector/Script acceptance and state restoration;
-  multi-instrument projects and range/stem rendering. The development source now
-  implements single-instrument hosting and restricted public parameter/state
-  control; see [the contract and workstation test procedure](VST3_CONTROL.md).
+  catalog-backed commercial drums/bass/keys acceptance and range rendering.
+  The development source implements discovery, native track instances/state and
+  aligned full-song stems/mix; see [the project contract](VST3_PROJECTS.md) and
+  [Inspector/Script workstation procedure](VST3_CONTROL.md).
 - Native MCP audio presentation and actual model audio input/listening.
 - Windows GUI and cross-platform runtime/audio compatibility.
 
@@ -188,3 +189,33 @@ loopback health or Docker behavior. Later GitHub CI, release and bounded deploym
 checks above supplied separate evidence; no local restriction was disabled.
 Human playback does not establish that the AI received or heard the audio.
 
+
+## Issue #10 local source verification — 2026-11-21
+
+A Linux x64 development build used .NET SDK 10.0.403 and the existing pinned VST3
+SDK v3.8.0_build_66 with its public MDA test module. No commercial preset, product
+inventory, private deployment path or generated audio is committed.
+
+Passed: 1 CTest codec case, 29 native CLI/ABI tests, 20 host/workspace/supervisor
+integration tests, 17 audio-renderer tests and 10 packaging tests (77 total).
+The generated 28-tool development Hub catalog matches the actual host. The six
+VST smoke scripts also passed locally: Inspector, Script/state rollback, CLI
+render, MIDI/WAV through MCP, control through MCP, and the new multi-instance
+catalog/project/stems/mix workflow.
+
+The new real-VST smoke covers three distinct instrument classes and four tracks,
+independent states for two instances of one class, project save/restart/reopen,
+correct onset rests across tempo changes, aligned float stems and PCM mix,
+replacement of one instrument without restarting, solo/pan, failure in a later
+part with no partial publication, and cancellation after one finished stem.
+Generated synthetic-float fixtures independently verify unclipped accumulation,
+pre-saturation peak/clipped-sample metering and non-finite sample rejection.
+Supervisor fixtures verify isolated module crash/timeout, long async scripts
+beyond the request deadline, prompt cancellation and scrubbed nullable
+rollback/audit summaries.
+
+This is local source/test-plugin evidence. GitHub Windows CI and the portable
+package have their own run results. Installed commercial instruments, real
+licensed library/preset choices, human playback of a commercial three-part song
+and production Hub acceptance remain pending. Do not describe this as accepted
+production band support until those checks have been recorded privately.

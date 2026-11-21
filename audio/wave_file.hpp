@@ -64,11 +64,12 @@ struct WaveFile {
         for (unsigned i = 0; i < count; ++i) b[i] = static_cast<unsigned char>(value >> (8 * i));
         bytes(b, count);
     }
-    void header(std::uint32_t frames, int rate) {
-        auto data_size = frames * 4;
+    void header(std::uint32_t frames, int rate, bool floating = false) {
+        auto alignment = floating ? 8U : 4U;
+        auto data_size = frames * alignment;
         bytes("RIFF", 4); little(data_size + 36, 4); bytes("WAVEfmt ", 8);
-        little(16, 4); little(1, 2); little(2, 2); little(static_cast<std::uint32_t>(rate), 4);
-        little(static_cast<std::uint32_t>(rate * 4), 4); little(4, 2); little(16, 2);
+        little(16, 4); little(floating ? 3 : 1, 2); little(2, 2); little(static_cast<std::uint32_t>(rate), 4);
+        little(static_cast<std::uint32_t>(rate * alignment), 4); little(alignment, 2); little(floating ? 32 : 16, 2);
         bytes("data", 4); little(data_size, 4);
     }
     void publish() {

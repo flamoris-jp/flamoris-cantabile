@@ -142,6 +142,7 @@ json inspect_plugin(const Options& options, PlugProvider& provider) {
     report["midi_output"] = {{"bus_count", event_outputs}, {"available", event_outputs > 0}, {"capture_supported", false},
                              {"status", event_outputs ? "event_bus_advertised_capture_not_implemented" : "no_event_output_bus"}};
     report["phase1_passed"] = true;
+    report["render_supported"] = processor && processor->canProcessSampleSize(kSample32) == kResultOk;
     if (report.dump().size() > maximum_response_bytes) fail("RESPONSE_LIMIT", "Inspector JSON exceeds response limit");
     check_deadline();
     return report;

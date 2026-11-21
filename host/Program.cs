@@ -18,7 +18,9 @@ public static class Program
                 serve --workspace DIRECTORY --hub-endpoint wss://HOST/desktop/UPSTREAM --credential-file PRIVATE_FILE [--permission edit|readOnly] [--health-port 8774]
                 catalog --workspace DIRECTORY
                 Environment: CANTABILE_CORE_LIBRARY (native library), CANTABILE_RENDERER (renderer executable), CANTABILE_SOUNDFONT (configured SoundFont).
-                VST: CANTABILE_VST3_MODULE, CANTABILE_VST3_PRESET, CANTABILE_VST3_CLASS_ID, CANTABILE_VST3_REALTIME (true|false|1|0), CANTABILE_VST3_WARMUP_MS (0..30000).
+                VST catalog: CANTABILE_RENDERER selects cantabile-client. CANTABILE_VST3_PATHS adds operator-registered scan roots (platform path separator); standard locations are always scanned. No single plugin is required in catalog mode.
+                Legacy single VST: CANTABILE_VST3_MODULE is required only for legacy configured selection; CANTABILE_VST3_PRESET and CANTABILE_VST3_CLASS_ID are optional.
+                VST rendering: CANTABILE_VST3_REALTIME (true|false|1|0), CANTABILE_VST3_WARMUP_MS (0..30000). CANTABILE_VST3_SCAN_TIMEOUT_MS (1..30000, default 30000) bounds each scan worker.
                 VST scripts: CANTABILE_VST3_SCRIPT_WRITE (true|false|1|0, default false) enables the edit-only write tool; Inspector and read scripts remain available without it.
                 Changes stay in memory until project_save; saved projects and completed exports survive compatible restarts.
                 """); return 0;
@@ -85,7 +87,7 @@ public static class Program
         {
             string name = item!["name"]!.GetValue<string>();
             bool readOnly = name == "mcp.context" || host.Boundary.Tools[name].Kind == OperationKind.Query;
-            bool destructive = name is "edit_batch" or "history_undo" or "history_redo" or "project_load" or "project_open" or "midi_import" or "file_release" or "audio_cancel" or "vst_script_write";
+            bool destructive = name is "edit_batch" or "history_undo" or "history_redo" or "project_load" or "project_open" or "midi_import" or "file_release" or "audio_cancel" or "vst_script_write" or "vst_script_begin" or "vst_job_cancel" or "instrument_assign" or "instrument_clear" or "instrument_state_set";
             item["annotations"] = JsonSerializer.SerializeToNode(new { readOnlyHint = readOnly, destructiveHint = destructive, openWorldHint = false });
         }
         return items;

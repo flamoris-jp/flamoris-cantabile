@@ -44,6 +44,18 @@ public sealed partial class Workspace : IDisposable
         return (json.RootElement.Clone(), Digest(bytes));
     }
     public void Opened(string name, string digest) { _ = ProjectPath(name); ActiveName = name; savedDigest = digest; }
+    internal JsonElement? ReadVstCatalog()
+    {
+        string path = Path.Combine(root, "vst3-catalog.json"); VerifyParents(root); DemandRegular(path);
+        if (!File.Exists(path)) return null;
+        using var json = JsonDocument.Parse(ReadBounded(path, 4 * 1024 * 1024)); return json.RootElement.Clone();
+    }
+    internal void SaveVstCatalog(object catalog)
+    {
+        VerifyParents(root); var bytes = JsonSerializer.SerializeToUtf8Bytes(catalog);
+        if (bytes.Length > 4 * 1024 * 1024) throw new McpFault("catalog_limit");
+        AtomicWrite(Path.Combine(root, "vst3-catalog.json"), bytes, overwrite: true);
+    }
     public object Save(JsonElement project, string? saveAs = null)
     {
         string name = saveAs ?? ActiveName, path = ProjectPath(name);
@@ -110,6 +122,27 @@ public sealed partial class Workspace : IDisposable
     public JsonElement PublishFile(string pending, string extension, string mimeType, long revision)
     {
         lock (artifactGate) return PublishFileLocked(pending, extension, mimeType, revision);
+    }
+    internal JsonElement[] PublishBatch(IReadOnlyList<string> files, long revision, CancellationToken token)
+        => PublishBatch(files.Select(file => (file, ".wav", "audio/wav")).ToArray(), revision, token);
+    internal JsonElement[] PublishBatch(IReadOnlyList<(string Path, string Extension, string Mime)> files, long revision, CancellationToken token)
+    {
+        lock (artifactGate)
+        {
+            long size = files.Sum(f => new FileInfo(f.Path).Length);
+            if (artifacts.Count + files.Count > 128 || size + artifacts.Values.Sum(a => a.Size) > MaximumTotalArtifactBytes) throw new McpFault("workspace_quota");
+            var published = new List<JsonElement>();
+            try
+            {
+                foreach (var file in files)
+                {
+                    token.ThrowIfCancellationRequested();
+                    published.Add(PublishFileLocked(file.Path, file.Extension, file.Mime, revision));
+                }
+                token.ThrowIfCancellationRequested(); return published.ToArray();
+            }
+            catch { foreach (var file in published) ReleaseArtifact(file.GetProperty("file_id").GetString()!); throw; }
+        }
     }
     private JsonElement PublishFileLocked(string pending, string extension, string mimeType, long revision)
     {

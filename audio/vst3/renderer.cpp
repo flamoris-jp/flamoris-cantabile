@@ -22,6 +22,7 @@
 #include <charconv>
 #include <chrono>
 #include <cmath>
+#include <bit>
 #include <fstream>
 #include <iostream>
 #include <optional>
@@ -89,7 +90,7 @@ struct Options {
     std::string class_id;
     int max_seconds = 600;
     int warmup_ms = 0;
-    bool list = false, realtime = false, inspect = false, scripting = false, allow_write = false;
+    bool list = false, realtime = false, inspect = false, scripting = false, allow_write = false, floating = false;
 };
 
 int bounded_integer(const fs::path& value, const std::string& flag, int minimum, int maximum) {
@@ -111,6 +112,7 @@ Options parse(int argc, Char** argv) {
     options.scripting = argc > 1 && fs::path(argv[1]) == "script";
     for (int i = (options.list || options.inspect || options.scripting) ? 2 : 1; i < argc; ++i) {
         const auto flag = utf8(argv[i]);
+        if (flag == "--float-output" && !options.list && !options.inspect && !options.scripting) { options.floating = true; continue; }
         if (flag == "--allow-write" && options.scripting) { options.allow_write = true; continue; }
         if (flag == "--realtime" && !options.list) {
             options.realtime = true;
@@ -337,6 +339,11 @@ json render(const Options& options, const Score& score, PlugProvider& provider, 
     for (int32 i = 1; i < output_count; ++i) component->activateBus(kAudio, kOutput, i, false);
     check(component->activateBus(kAudio, kOutput, 0, true), "Cannot activate main output");
     check(component->activateBus(kEvent, kInput, 0, true), "Cannot activate MIDI input");
+    BusInfo event_info{};
+    check(component->getBusInfo(kEvent, kInput, 0, event_info), "Cannot query MIDI input");
+    for (const auto& message : score.messages)
+        if ((message.status & 15) >= event_info.channelCount)
+            fail("UNSUPPORTED_CHANNEL", "MIDI channel exceeds event input channels; configure the track render channel explicitly");
     const auto mode = options.realtime ? kRealtime : kOffline;
     ProcessSetup setup{mode, kSample32, block_size, sample_rate};
     check(processor->setupProcessing(setup), "VST instrument rejected the selected processing mode");
@@ -353,7 +360,7 @@ json render(const Options& options, const Score& score, PlugProvider& provider, 
         fail("VST_UNSUPPORTED", "Plugin latency exceeds two seconds");
 
     WaveFile wave(options.output);
-    wave.header(static_cast<uint32>(score.frames), sample_rate);
+    wave.header(static_cast<uint32>(score.frames), sample_rate, options.floating);
     std::array<float, block_size> left{}, right{};
     std::array<Sample32*, 2> buffers{left.data(), right.data()};
     std::vector<AudioBusBuffers> inputs(input_count), outputs(output_count);
@@ -381,7 +388,7 @@ json render(const Options& options, const Score& score, PlugProvider& provider, 
     std::uint64_t clipped = 0;
     std::size_t next = 0, timing_index = 0;
     const auto end = score.frames + latency;
-    std::array<unsigned char, block_size * 4> pcm{};
+    std::array<unsigned char, block_size * 8> pcm{};
     const auto start = Clock::now();
     for (std::int64_t position = 0; position < end;) {
         check_deadline();
@@ -395,6 +402,12 @@ json render(const Options& options, const Score& score, PlugProvider& provider, 
         auto block_end = std::min(position + block_size, end);
         if (timing_index + 1 < score.timings.size())
             block_end = std::min(block_end, score.timings[timing_index + 1].frame);
+        // Deliver events at offset zero in variable-sized blocks without moving
+        // them on the song timeline. This also avoids instruments that lose an
+        // event exactly at an internal processing-slice boundary.
+        auto following = next;
+        while (following < score.messages.size() && score.messages[following].frame <= position) ++following;
+        if (following < score.messages.size()) block_end = std::min(block_end, score.messages[following].frame);
         const auto count = static_cast<int32>(block_end - position);
         events.clear();
         parameters.clearQueue();
@@ -423,9 +436,10 @@ json render(const Options& options, const Score& score, PlugProvider& provider, 
                 if (!std::isfinite(sample)) fail("INVALID_AUDIO", "VST produced non-finite audio");
                 peak = std::max(peak, static_cast<double>(std::abs(sample)));
                 if (std::abs(sample) > 1) ++clipped;
-                auto value = static_cast<std::uint16_t>(std::lrint(std::clamp(sample, -1.F, 1.F) * 32767));
-                pcm[pcm_size++] = static_cast<unsigned char>(value);
-                pcm[pcm_size++] = static_cast<unsigned char>(value >> 8);
+                const auto value = options.floating ? std::bit_cast<std::uint32_t>(sample) :
+                    static_cast<std::uint32_t>(static_cast<std::uint16_t>(std::lrint(std::clamp(sample, -1.F, 1.F) * 32767)));
+                for (unsigned b = 0; b < (options.floating ? 4U : 2U); ++b)
+                    pcm[pcm_size++] = static_cast<unsigned char>(value >> (b * 8));
             }
         }
         wave.bytes(pcm.data(), pcm_size);
@@ -435,7 +449,7 @@ json render(const Options& options, const Score& score, PlugProvider& provider, 
     wave.publish();
     return {{"ok", true}, {"backend", "vst3"}, {"sample_rate", sample_rate},
             {"process_mode", options.realtime ? "realtime" : "offline"},
-            {"channels", 2}, {"sample_format", "pcm_s16le"}, {"frames", score.frames},
+            {"channels", 2}, {"sample_format", options.floating ? "ieee_float32le" : "pcm_s16le"}, {"frames", score.frames},
             {"duration_seconds", static_cast<double>(score.frames) / sample_rate},
             {"peak", peak}, {"clipped_samples", clipped}};
 }
@@ -459,16 +473,20 @@ json run(const Options& options) {
     const auto& factory = module->getFactory();
     factory.setHostContext(application);
     auto classes = json::array();
+    auto all_classes = json::array();
     std::optional<Hosting::ClassInfo> selected;
     for (auto& info : factory.classInfos()) {
         const auto& categories = info.subCategories();
-        if (info.category() != kVstAudioEffectClass ||
-            std::find(categories.begin(), categories.end(), "Instrument") == categories.end()) continue;
+        if (info.category() != kVstAudioEffectClass) continue;
+        const bool instrument = std::find(categories.begin(), categories.end(), "Instrument") != categories.end();
         auto id = info.ID().toString();
-        classes.push_back({{"id", id}, {"name", info.name()}, {"vendor", info.vendor()}});
-        if (options.class_id.empty() || options.class_id == id) selected = info;
+        json entry{{"id", id}, {"name", info.name()}, {"vendor", info.vendor()}, {"version", info.version()},
+            {"kind", instrument ? "instrument" : "effect"}};
+        all_classes.push_back(entry);
+        if (instrument) classes.push_back(entry);
+        if ((instrument || options.inspect) && (options.class_id.empty() || options.class_id == id)) selected = info;
     }
-    if (options.list) return {{"ok", true}, {"instruments", std::move(classes)}};
+    if (options.list) return {{"ok", true}, {"instruments", std::move(classes)}, {"classes", std::move(all_classes)}};
     if (!selected) fail("VST_UNSUPPORTED", "No matching instrument class in the VST module");
     if (options.class_id.empty() && classes.size() != 1)
         fail("VST_UNSUPPORTED", "Module contains several instruments; use list and pass --class-id");
@@ -493,7 +511,7 @@ int main_for(int argc, Char** argv) {
                          "cantabile-client script --plugin PATH.vst3 --script REQUEST.json --workspace DIR [--allow-write]\n"
                          "cantabile-client --plugin PATH.vst3 [--class-id ID] [--preset FILE.vstpreset]\n"
                          "                 --midi PART.mid --output OUT.wav [--max-seconds 600]\n"
-                         "                 [--realtime] [--warmup-ms 0]\n";
+                         "                 [--realtime] [--warmup-ms 0] [--float-output]\n";
             return 0;
         }
         std::cout << run(parse(argc, argv)).dump(-1, ' ', false, json::error_handler_t::replace) << '\n';

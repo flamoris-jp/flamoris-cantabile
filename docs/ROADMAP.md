@@ -34,12 +34,14 @@ Checkmarks describe source, not deployment. See [acceptance evidence](ACCEPTANCE
 - [x] Read-only VST 3 Inspector for public parameters, MIDI mappings, buses, program information and selected standard interfaces.
 - [x] Restricted JSON Script Controller for public parameter access, MIDI-to-WAV and standard preset state; separate read/write grants, limits and isolated MCP workers. See [operations and workstation gates](VST3_CONTROL.md).
 - [ ] Confirm installed commercial instruments and Cubase round trips on the Windows production workstation.
-- [ ] Automatic installed-module discovery and multi-instrument projects.
+- [x] Asynchronous installed-VST3 catalog, native track assignments/state, same-plugin independent instances, full-song aligned stems/mix, and detailed async script failures. See [development contract](VST3_PROJECTS.md).
+- [ ] Commercial drums/bass/keys workstation acceptance for the catalog-backed project path.
 - [ ] Capture actual VST 3 MIDI output events; current Inspector reports output-bus availability only.
 - [ ] Investigate internal composition features separately; Issue #8 Phase 3 is outside the Inspector/Script implementation.
 - [ ] Verify selected free Linux VST 3 instruments headlessly inside Docker.
 - [ ] Phrase arrangement, splits/joins, track reorder/duplicate and more transforms.
-- [ ] Range rendering and separate stems.
+- [x] Full-song aligned per-track float stems and float64-summed PCM mix in catalog-backed projects.
+- [ ] Range rendering.
 - [ ] Larger upload contracts as concrete workflows need them.
 - [ ] Schema migration and compatible upgrade predecessor policy.
 - [ ] Windows GUI using the same core, schema, typed edits and history.
