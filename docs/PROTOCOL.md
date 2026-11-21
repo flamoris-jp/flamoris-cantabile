@@ -223,3 +223,26 @@ An exported composed note counts as two MIDI events; generated track-name/EOT
 events also count toward the export bound. Error codes include `INVALID_REQUEST`,
 `INVALID_PROJECT`, `INVALID_MIDI`, `MIDI_EXPORT_FAILED`, `REVISION_CONFLICT`,
 `NOT_FOUND`, `NO_HISTORY`, `LIMIT_EXCEEDED`, and `UNSUPPORTED_OP`.
+
+## Optional catalog instruments and audio plans (schema 1 extension)
+
+Catalog-backed `instrument` objects use exactly `backend: "vst3"`, a host-managed
+`catalog_id`, and optional embedded standard `state_base64` (up to 1 MiB decoded).
+Legacy opaque instrument objects without a catalog ID remain round-trippable.
+`track.update` accepts `instrument: null` to remove an assignment and state,
+`volume` (linear 0..4), `pan` (-1..1 stereo balance), and optional `render_channel`
+(0..15, null removes the override). All use native validation, revisions/history
+and project persistence; a failed edit consumes no history.
+
+The read-only native ABI request `audio.plan` returns `{ok, revision, parts}`,
+where each part contains `track_id`, `instrument`, `volume`, `pan` and a
+`midi_base64` SMF snapshot. It keeps the common conductor tempo/meter map, absolute
+song-origin tick positions and global end tick. Solo/mute selects active parts;
+an optional `track_id` instead selects exactly one track, even when muted, for
+Inspector/Script use. Render-channel remapping affects only this snapshot. Query
+calls do not alter the music project or history. Maximum 32 parts, 1 MiB MIDI per
+part and 16 MiB total; the existing project budgets remain unchanged.
+
+The host resolves catalog IDs through its private registry and reports missing
+instruments by track without fallback. See [VST3 projects](VST3_PROJECTS.md) for
+host tools, job/result contracts, sound-state workflow, limits and acceptance.

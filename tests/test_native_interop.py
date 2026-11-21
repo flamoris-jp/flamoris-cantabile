@@ -553,6 +553,49 @@ class NativeInteropTests(unittest.TestCase):
         self.assertEqual(state["revision"], 1)
         self.assertTrue(state["can_undo"])
 
+    def test_band_plan_preserves_global_time_map_and_render_channel(self):
+        project = {"schema_version": 1, "ppq": 480, "tracks": [
+            {"id": "clock", "end_tick": 3840, "events": [
+                {"kind": "meta", "tick": 0, "meta_type": 81, "data": [7, 161, 32]},
+                {"kind": "meta", "tick": 960, "meta_type": 81, "data": [6, 26, 128]},
+                {"kind": "meta", "tick": 0, "meta_type": 88, "data": [3, 2, 24, 8]}]},
+            {"id": "piano", "render_channel": 2, "events": [
+                {"kind": "note", "tick": 480, "duration": 480, "pitch": 60, "velocity": 90}]},
+            {"id": "bass", "muted": True, "events": [
+                {"kind": "midi", "tick": 1920, "status": 0x99, "data": [40, 100]},
+                {"kind": "midi", "tick": 2400, "status": 0x89, "data": [40, 0]}]}]}
+        self.loaded(project)
+        before = self.project()
+        plan = self.good(self.call("audio.plan"))
+        self.assertEqual([p["track_id"] for p in plan["parts"]], ["piano"])
+        _, _, tracks = parse_smf(base64.b64decode(plan["parts"][0]["midi_base64"]))
+        self.assertIn((480, "midi", 0x92, b"\x3c\x5a"), tracks[1])
+        for track in tracks:
+            self.assertIn((3840, "meta", 0x2f, b""), track)
+        self.assertEqual(sum(e[1] == "meta" and e[2] == 81 for e in tracks[0]), 2)
+        selected = self.good(self.call("audio.plan", track_id="bass"))
+        self.assertEqual(selected["parts"][0]["track_id"], "bass")
+        self.assertFalse(self.call("audio.plan", track_id="missing")["ok"])
+        self.assertEqual(self.project(), before)
+
+    def test_catalog_instruments_mixer_settings_state_and_history(self):
+        state = base64.b64encode(b"VST3" + b"\0" * 44).decode()
+        self.loaded({"schema_version": 1, "ppq": 480, "tracks": [{"id": "a", "events": []}]})
+        instrument = {"backend": "vst3", "catalog_id": "vst3-test", "state_base64": state}
+        self.good(self.edit({"op": "track.update", "track_id": "a", "patch": {"instrument": instrument, "volume": 0.4, "pan": -0.5}}))
+        saved = self.project()
+        for patch in ({"volume": -1}, {"volume": 5}, {"volume": True}, {"pan": 2}, {"render_channel": 16},
+                      {"instrument": {**instrument, "module": "private.vst3"}},
+                      {"instrument": {**instrument, "state_base64": "AA=="}}):
+            self.assertFalse(self.edit({"op": "track.update", "track_id": "a", "patch": patch})["ok"])
+            self.assertEqual(self.project(), saved)
+        self.good(self.edit({"op": "track.update", "track_id": "a", "patch": {"instrument": None}}))
+        self.assertNotIn("instrument", self.project()["tracks"][0])
+        self.good(self.call("history.undo", mutate=True))
+        self.assertEqual(self.project(), saved)
+        self.loaded(json.loads(json.dumps(saved)))
+        self.assertEqual(self.project(), saved)
+
 
 if __name__ == "__main__":
     unittest.main()

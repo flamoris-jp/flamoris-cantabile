@@ -4,6 +4,7 @@
 #include <nlohmann/json.hpp>
 #include <algorithm>
 #include <cstring>
+#include <cmath>
 #include <deque>
 #include <limits>
 #include <memory>
@@ -11,6 +12,7 @@
 #include <set>
 #include <stdexcept>
 #include <string>
+#include <tuple>
 
 namespace {
 using json = nlohmann::json;
@@ -51,6 +53,25 @@ bool valid_id(const std::string& id) {
         return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') ||
             (c >= '0' && c <= '9') || c == '-' || c == '_' || c == '.' || c == ':';
     });
+}
+void validate_instrument(const json& instrument) {
+    require(instrument.is_object(), "instrument must be an object");
+    // Legacy opaque instrument settings remain round-trippable. Catalog-backed
+    // VST instances use a closed, portable contract with no machine paths.
+    if (!instrument.contains("catalog_id")) return;
+    for (auto it = instrument.begin(); it != instrument.end(); ++it)
+        require(it.key() == "backend" || it.key() == "catalog_id" || it.key() == "state_base64", "Unknown catalog instrument field");
+    require(instrument.value("backend", "") == "vst3", "Catalog instruments require VST3");
+    require(valid_id(string_field(instrument, "catalog_id", 128)), "Invalid catalog ID");
+    if (instrument.contains("state_base64")) {
+        auto text = string_field(instrument, "state_base64", 1398104);
+        try {
+            auto state = cantabile::base64_decode(text);
+            require(state.size() >= 48 && state.size() <= 1024 * 1024, "Invalid state size");
+            require(std::memcmp(state.data(), "VST3", 4) == 0, "State must be a standard VST preset");
+        } catch (const Error&) { throw; }
+        catch (...) { throw Error("INVALID_PROJECT", "Invalid state encoding"); }
+    }
 }
 json empty_project() {
     return {{"schema_version", 1}, {"name", "Untitled"}, {"ppq", 480}, {"smf_format", 1}, {"tracks", json::array()}};
@@ -138,9 +159,13 @@ void normalize(json& project) {
         string_field(track, "name");
         if (!track.contains("channel")) track["channel"] = 0;
         field_number(track, "channel", 0, 15);
+        if (track.contains("render_channel")) field_number(track, "render_channel", 0, 15);
         for (const char* field : {"muted", "solo"})
             if (track.contains(field)) require(track[field].is_boolean(), std::string(field) + " must be boolean");
-        if (track.contains("instrument")) require(track["instrument"].is_object(), "instrument must be an object");
+        if (track.contains("instrument")) validate_instrument(track["instrument"]);
+        for (const auto& [field, lo, hi] : {std::tuple{"volume", 0., 4.}, std::tuple{"pan", -1., 1.}})
+            if (track.contains(field)) require(track[field].is_number() && std::isfinite(track[field].get<double>()) &&
+                track[field].get<double>() >= lo && track[field].get<double>() <= hi, std::string("Invalid ") + field);
         if (track.contains("end_tick")) field_number(track, "end_tick", 0, max_tick);
         for (auto& event : track["events"]) { assign_id(event, "event-"); validate_event(event); }
     }
@@ -182,7 +207,9 @@ void apply_command(json& project, const json& command) {
     } else if (op == "track.update") {
         auto& track = find_track(project, command);
         const auto& value = command.at("patch");
-        patch(track, value, {"name", "channel", "instrument", "muted", "solo", "end_tick"});
+        patch(track, value, {"name", "channel", "render_channel", "instrument", "muted", "solo", "end_tick", "volume", "pan"});
+        if (track.contains("instrument") && track["instrument"].is_null()) track.erase("instrument");
+        if (track.contains("render_channel") && track["render_channel"].is_null()) track.erase("render_channel");
         if (value.contains("name") && value["name"].is_string()) {
             // Preserve untouched imported track-name bytes exactly; an explicit
             // rename updates the first naming event as well as the display name.
@@ -266,6 +293,52 @@ public:
         require(request.is_object(), "Request must be an object", "INVALID_REQUEST");
         auto op = string_field(request, "op", 64);
         if (op == "project.get") return state();
+        if (op == "audio.plan") {
+            if (request.contains("expected_revision")) guard(request);
+            const auto selected = request.value("track_id", std::string{});
+            bool found = selected.empty(), any_solo = false;
+            std::int64_t end = 0;
+            json conductor = {{"id", "conductor"}, {"channel", 0}, {"events", json::array()}};
+            for (const auto& track : project_["tracks"]) {
+                any_solo = any_solo || track.value("solo", false);
+                end = std::max(end, track.value("end_tick", std::int64_t{0}));
+                for (const auto& e : track["events"]) {
+                    auto tick = e.at("tick").get<std::int64_t>();
+                    end = std::max(end, tick + (e["kind"] == "note" ? e.at("duration").get<std::int64_t>() : 0));
+                    if (e["kind"] == "meta" && (e["meta_type"] == 81 || e["meta_type"] == 88)) conductor["events"].push_back(e);
+                }
+            }
+            conductor["end_tick"] = end;
+            auto parts = json::array();
+            std::size_t midi_bytes = 0;
+            for (const auto& track : project_["tracks"]) {
+                if (!selected.empty() && track["id"] != selected) continue;
+                if (!selected.empty()) found = true;
+                if (selected.empty() && (track.value("muted", false) || (any_solo && !track.value("solo", false)))) continue;
+                auto part = track; part["events"] = json::array(); part["end_tick"] = end;
+                for (const auto& e : track["events"]) if (e["kind"] != "meta") {
+                    auto event = e;
+                    if (track.contains("render_channel")) {
+                        int channel = track["render_channel"].get<int>();
+                        if (event["kind"] == "note") event["channel"] = channel;
+                        else if (event["kind"] == "midi") event["status"] = (event["status"].get<int>() & 0xf0) | channel;
+                    }
+                    part["events"].push_back(std::move(event));
+                }
+                if (selected.empty() && part["events"].empty()) continue;
+                require(parts.size() < 32, "Render exceeds 32 active tracks", "LIMIT_EXCEEDED");
+                auto score = project_; score["smf_format"] = 1;
+                score["tracks"] = json::array({conductor, part});
+                const auto bytes = cantabile::export_midi(score);
+                midi_bytes += bytes.size();
+                require(bytes.size() <= 1024 * 1024 && midi_bytes <= 16 * 1024 * 1024, "Render MIDI snapshot exceeds limit", "LIMIT_EXCEEDED");
+                parts.push_back({{"track_id", track["id"]}, {"instrument", track.value("instrument", json::object())},
+                    {"volume", track.value("volume", 1.)}, {"pan", track.value("pan", 0.)},
+                    {"midi_base64", cantabile::base64_encode(bytes)}});
+            }
+            require(found, "Track does not exist", "NOT_FOUND");
+            return {{"ok", true}, {"revision", revision_}, {"parts", parts}};
+        }
         if (op == "midi.export") {
             if (request.contains("expected_revision")) guard(request);
             auto data = project_;

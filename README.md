@@ -8,15 +8,17 @@
 
 **現在：公開プレビュー v0.1.0。** AIがCLI/MCPで音符やトラックを組み立て、MIDIと試聴用WAVを書き出せます。開発版のCantabileClientではVST 3による演奏、公開機能の読み取り、制限付きJSONスクリプトによる制御を実装しています。Windows GUIは未実装です。公開版・CI・商用音源の実機確認は別々に記録しています。
 
-**CantabileClient in development.** The optional headless VST 3 build runs one
-installed instrument and can render a MIDI part through CLI or MCP. Its Inspector
-reports public parameters, MIDI mappings, buses, programs and selected standard
-interfaces. A bounded JSON operation language controls parameters, MIDI rendering
-and VST preset snapshots; writes require a separate permission. Keep exported MIDI
-to edit in Cubase. See the [Windows preview guide](audio/vst3/README.md) and
-[Inspector / Script Controller specification](docs/VST3_CONTROL.md). EZkeys 2,
-EZdrummer 3 and EZbass Inspector/Script acceptance requires separate workstation
-tests. Internal songwriting features, including Bandmate, are outside this change.
+**CantabileClient in development.** The optional VST3 worker now supports
+asynchronous installed-plugin discovery, native track assignments with independent
+standard sound state, and sequential rendering of aligned float stems plus a
+complete PCM mix. Inspector and bounded JSON scripts can target a track; long
+scripts use background jobs with typed failure/rollback summaries. See
+[catalog-backed projects and limits](docs/VST3_PROJECTS.md), the
+[Windows preview guide](audio/vst3/README.md) and
+[Inspector / Script Controller specification](docs/VST3_CONTROL.md).
+Public test-plugin verification and commercial-instrument workstation acceptance
+remain separate. Internal songwriting features, including Bandmate, are outside
+this change. Production band acceptance is pending.
 
 Windows users can use the [GitHub CLI update launcher](audio/vst3/CantabileClient-Update.cmd)
 to fetch the latest successful main Windows build without manually downloading
@@ -44,7 +46,7 @@ Cantabile owns its music project, native typed edits and Undo/Redo, MIDI import/
 | Files | JSON project save/load; MCP workspace operations and bounded artifact transfer with digests |
 | MCP | Shared FLAMORIS permissions/guards and WSS provider; official SDK stdio; one editing authority |
 | Audio | Real offline FluidSynth + separately installed SoundFont; stereo PCM16 WAV, cancellation, result retrieval |
-| VST 3 control (development) | Read-only Inspector; bounded typed JSON operations; separate write permission; isolated worker; standard preset save/restore |
+| VST 3 control (development) | Async installed-plugin catalog; native track instances/state; targeted Inspector/scripts; independent float stems and float64-summed PCM mix; bounded jobs/cancellation |
 | Distribution | Nonroot Dockerfile, Updater candidate generator, image/source/digest checks, retained data layout |
 
 ### Supported boundary / 対応範囲
@@ -53,7 +55,7 @@ Imported note-on/off messages remain raw events to preserve overlaps, unmatched 
 
 Type 2, SMPTE timing, extended/unknown chunks and malformed input fail explicitly. History is bounded and session-local; project saves do not persist Undo history.
 
-The first audio backend uses a configured SoundFont and MIDI bank/program events. **The optional CantabileClient development build hosts one VST 3 instrument and exposes its public standard control APIs. Multi-instrument VST projects, internal phrase generation, range/stem rendering and the Windows GUI remain pending.** Unsupported instrument settings fail instead of being silently substituted.
+The first audio backend uses a configured SoundFont and MIDI bank/program events. **The optional CantabileClient development build implements catalog-backed multi-instrument projects and aligned full-song stems/mix, with public standard control APIs. Commercial-instrument band acceptance, internal phrase generation, range rendering and the Windows GUI remain pending.** Unsupported instrument settings fail instead of being silently substituted.
 
 Audio creation and complete-byte retrieval have been verified independently, and the operator has listened to the retrieved audio. Native MCP audio presentation and actual model listening still require separate client acceptance; a WAV file alone does not establish that the AI heard it.
 
@@ -101,6 +103,7 @@ The WAV path must be new. No display server, sound card, GPU or model API is use
 - [MCP host setup and tools](host/README.md)
 - [Renderer and audio tests](audio/README.md)
 - [VST 3 Inspector, restricted scripts and commercial-instrument test procedure](docs/VST3_CONTROL.md)
+- [Installed VST3 discovery, track states, asynchronous stems/mix and workstation gates](docs/VST3_PROJECTS.md)
 - [Published preview and Docker/Updater distribution](packaging/README.md)
 - [Acceptance evidence](docs/ACCEPTANCE.md)
 - [Remaining roadmap](docs/ROADMAP.md)

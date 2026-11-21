@@ -1,3 +1,10 @@
+> Issue #10 extends this development control path with [catalog-backed projects](VST3_PROJECTS.md).
+> Inspector/scripts accept an optional `track_id` and load that instance's saved
+> state. `vst_script_begin` runs the same bounded write DSL asynchronously and
+> preserves typed rollback/audit summaries through job status. The legacy calls
+> below remain supported. State changes become native project edits only through
+> `instrument_state_set`.
+
 # VST 3 Inspector and Script Controller
 
 This is the development contract for Issue #8, Phases 1 and 2. It extends the

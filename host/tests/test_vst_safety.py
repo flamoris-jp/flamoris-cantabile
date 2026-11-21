@@ -103,6 +103,8 @@ class VstSafetyTests(unittest.TestCase):
         self.assertIn("vst_inspect", names)
         self.assertIn("vst_script", names)
         self.assertNotIn("vst_script_write", names)
+        for name in ("vst_scan", "vst_script_begin", "vst_job_cancel", "instrument_assign", "instrument_clear", "instrument_state_set"):
+            self.assertNotIn(name, names)
         self.assertTrue(self.client.tool_result("vst_script_write", script({"op": "set_parameter", "id": 0, "value": 0.5}))["isError"])
         self.assertFalse(self.marker.exists())
         self.healthy_after_failure()
@@ -183,6 +185,49 @@ class VstSafetyTests(unittest.TestCase):
         self.start("pathlib.Path('unauthorized.wav').write_bytes(b'not audio')\n"
                    "print(json.dumps({'ok':True, 'phase1_passed':True, 'results':[], 'files':[{'name':'unauthorized.wav','kind':'wav'}]}))")
         self.failure(self.client.tool_result("vst_script", script({"op": "inspect"}), guard=False), "vst_write_required")
+        self.healthy_after_failure()
+
+    def wait_job(self, job, timeout=18):
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline:
+            status = self.client.tool("vst_job_status", {"job_id": job["job_id"]}, guard=False)
+            if status["state"] in {"completed", "cancelled", "failed"}:
+                return status
+            time.sleep(0.03)
+        self.fail("Job did not finish")
+
+    def test_async_script_outlives_request_and_keeps_editor_responsive(self):
+        self.start("time.sleep(11)\nprint(json.dumps({'ok':True,'phase1_passed':True,'results':[],'files':[]}))", write=True)
+        started = time.monotonic()
+        job = self.client.tool("vst_script_begin", script({"op": "inspect"}, timeout=14000))
+        self.assertLess(time.monotonic() - started, 2)
+        self.assertIn("project", self.client.tool("project_get", {}, guard=False))
+        self.assertEqual(self.wait_job(job)["state"], "completed")
+        self.assertGreater(time.monotonic() - started, 10)
+        self.healthy_after_failure()
+
+    def test_async_failure_preserves_typed_rollback_and_scrubs_plugin_text(self):
+        self.start("print(json.dumps({'ok':False,'error':{'code':'VST_PROCESS_FAILED',"
+                   "'message':'private plugin text /secret/location','rollback':{'attempted':True,'restored':False,'raw':'secret'},"
+                   "'audit':[{'index':0,'op':'set_parameter','status':'failed','raw':'secret'}]}}))\nsys.exit(1)", write=True)
+        job = self.client.tool("vst_script_begin", script({"op": "set_parameter", "id": 0, "value": 0.1}))
+        status = self.wait_job(job)
+        self.assertEqual(status["state"], "failed")
+        self.assertEqual(status["error"]["rollback"], {"attempted": True, "restored": False, "status": "failed"})
+        self.assertEqual(status["error"]["audit"], [{"index": 0, "op": "set_parameter", "status": "failed"}])
+        self.assertNotIn("secret", json.dumps(status))
+        self.healthy_after_failure()
+
+    def test_async_cancel_kills_worker_and_reports_unknown_rollback(self):
+        self.start("time.sleep(120)", write=True)
+        job = self.client.tool("vst_script_begin", script({"op": "inspect"}, timeout=120000))
+        deadline = time.monotonic() + 3
+        while not self.marker.exists() and time.monotonic() < deadline:
+            time.sleep(0.02)
+        self.client.tool("vst_job_cancel", {"job_id": job["job_id"]})
+        status = self.wait_job(job)
+        self.assertEqual(status["state"], "cancelled")
+        self.assertEqual(status["error"]["rollback"]["status"], "unknown")
         self.healthy_after_failure()
 
 

@@ -1,4 +1,3 @@
-using System.Diagnostics;
 using System.Globalization;
 using System.Text;
 using System.Text.Json;
@@ -33,7 +32,11 @@ public sealed partial class VstController(Workspace workspace)
         foreach (var p in value.EnumerateObject())
             if (!fields.Contains(p.Name) || !seen.Add(p.Name)) throw new ArgumentException("Unexpected field.");
     }
-    public static JsonElement InspectInput(JsonElement input) { Object(input); return input.Clone(); }
+    public static JsonElement InspectInput(JsonElement input) { Object(input, "track_id"); ValidateTrack(input); return input.Clone(); }
+    private static void ValidateTrack(JsonElement input)
+    {
+        if (input.TryGetProperty("track_id", out var track) && (track.ValueKind != JsonValueKind.String || track.GetString() is not { Length: > 0 and <= 128 })) throw new ArgumentException("Invalid track.");
+    }
     public static JsonElement ScriptInput(JsonElement input, bool write)
     {
         try { return ValidateScriptInput(input, write); }
@@ -42,7 +45,7 @@ public sealed partial class VstController(Workspace workspace)
     }
     private static JsonElement ValidateScriptInput(JsonElement input, bool write)
     {
-        Object(input, write ? ["script", "files"] : ["script"]);
+        Object(input, write ? ["script", "files", "track_id"] : ["script", "track_id"]); ValidateTrack(input);
         if (!input.TryGetProperty("script", out var script) || Encoding.UTF8.GetByteCount(script.GetRawText()) > MaximumScriptBytes)
             throw new ArgumentException("Missing or oversized script.");
         Object(script, "version", "operations", "limits");
@@ -82,35 +85,46 @@ public sealed partial class VstController(Workspace workspace)
             !(stem.Length == 4 && (stem.StartsWith("COM", StringComparison.Ordinal) || stem.StartsWith("LPT", StringComparison.Ordinal)) && stem[3] is >= '1' and <= '9');
     }
 
-    public JsonElement Inspect(CancellationToken token) => ExecuteAsync(null, false, null, -1, token).GetAwaiter().GetResult();
-    public JsonElement Script(JsonElement input, bool write, byte[]? midi, long revision, CancellationToken token)
-        => ExecuteAsync(input, write, midi, revision, token).GetAwaiter().GetResult();
+    public JsonElement Inspect(CancellationToken token, VstCatalog.Entry? target = null, byte[]? state = null)
+    {
+        try { return ExecuteAsync(null, false, null, -1, token, target, state).GetAwaiter().GetResult(); }
+        catch (WorkerFailure failure) { throw new McpFault(failure.Code); }
+    }
+    public JsonElement Script(JsonElement input, bool write, byte[]? midi, long revision, CancellationToken token, VstCatalog.Entry? target = null, byte[]? state = null)
+    {
+        try { return ExecuteAsync(input, write, midi, revision, token, target, state).GetAwaiter().GetResult(); }
+        catch (WorkerFailure failure) { throw new McpFault(failure.Code); }
+    }
 
-    private async Task<JsonElement> ExecuteAsync(JsonElement? input, bool write, byte[]? midi, long revision, CancellationToken token)
+    public async Task<JsonElement> ExecuteAsync(JsonElement? input, bool write, byte[]? midi, long revision, CancellationToken token,
+        VstCatalog.Entry? target = null, byte[]? state = null)
     {
         string tool = input is null ? "vst_inspect" : write ? "vst_script_write" : "vst_script";
         int operations = input?.GetProperty("script").GetProperty("operations").GetArrayLength() ?? 0;
         string? sandbox = null;
         var published = new List<JsonElement>();
+        var pendingFiles = new List<(string Path, string Extension, string Mime)>();
         int timeout = 30000;
         if (input is { } request && request.GetProperty("script").TryGetProperty("limits", out var limits) && limits.TryGetProperty("timeout_ms", out var time)) timeout = time.GetInt32();
         using var lifetime = CancellationTokenSource.CreateLinkedTokenSource(token);
         lifetime.CancelAfter(timeout);
         try
         {
+            string? selectedModule = target?.Path ?? module, selectedClass = target?.ClassId ?? classId;
+            string? selectedPreset = target is null ? preset : null;
             if (write && !writeEnabled) throw new McpFault("vst_write_disabled");
-            if (!File.Exists(renderer) || string.IsNullOrEmpty(module) || (!File.Exists(module) && !Directory.Exists(module)) || (!string.IsNullOrEmpty(preset) && !File.Exists(preset))) throw new McpFault("vst_backend_unavailable");
+            if (!File.Exists(renderer) || string.IsNullOrEmpty(selectedModule) || (!File.Exists(selectedModule) && !Directory.Exists(selectedModule)) || (!string.IsNullOrEmpty(selectedPreset) && !File.Exists(selectedPreset))) throw new McpFault("vst_backend_unavailable");
             lifetime.Token.ThrowIfCancellationRequested();
             sandbox = workspace.CreateVstSandbox();
-            using var process = new Process { StartInfo = new ProcessStartInfo(Path.GetFullPath(renderer!))
+            if (state is not null)
             {
-                RedirectStandardOutput = true, RedirectStandardError = true, UseShellExecute = false, CreateNoWindow = true,
-                WorkingDirectory = sandbox
-            } };
-            var args = process.StartInfo.ArgumentList;
-            args.Add(input is null ? "inspect" : "script"); args.Add("--plugin"); args.Add(Path.GetFullPath(module));
-            if (!string.IsNullOrEmpty(preset)) { args.Add("--preset"); args.Add(Path.GetFullPath(preset)); }
-            if (!string.IsNullOrEmpty(classId)) { args.Add("--class-id"); args.Add(classId); }
+                selectedPreset = Path.Combine(sandbox, ".instance.vstpreset");
+                await File.WriteAllBytesAsync(selectedPreset, state, lifetime.Token);
+            }
+            var args = new List<string>();
+            args.Add(input is null ? "inspect" : "script"); args.Add("--plugin"); args.Add(Path.GetFullPath(selectedModule));
+            if (!string.IsNullOrEmpty(selectedPreset)) { args.Add("--preset"); args.Add(Path.GetFullPath(selectedPreset)); }
+            if (!string.IsNullOrEmpty(selectedClass)) { args.Add("--class-id"); args.Add(selectedClass); }
             if (input is { } scriptInput)
             {
                 if (scriptInput.TryGetProperty("files", out var bindings))
@@ -130,32 +144,8 @@ public sealed partial class VstController(Workspace workspace)
                 string? warmup = Environment.GetEnvironmentVariable("CANTABILE_VST3_WARMUP_MS");
                 if (!string.IsNullOrEmpty(warmup)) { args.Add("--warmup-ms"); args.Add(warmup); }
             }
-            SafeEnvironment(process.StartInfo);
-            lifetime.Token.ThrowIfCancellationRequested();
-            if (!process.Start()) throw new McpFault("vst_start_failed");
-            Task<string> stdout = ReadTextAsync(process.StandardOutput, 8 * 1024 * 1024, lifetime.Token);
-            Task<string> stderr = ReadTextAsync(process.StandardError, 16384, lifetime.Token);
-            try
-            {
-                var pending = new List<Task> { process.WaitForExitAsync(lifetime.Token), stdout, stderr };
-                while (pending.Count != 0) { var done = await Task.WhenAny(pending).ConfigureAwait(false); await done.ConfigureAwait(false); pending.Remove(done); }
-            }
-            catch
-            {
-                try { process.Kill(entireProcessTree: true); await process.WaitForExitAsync(CancellationToken.None).ConfigureAwait(false); } catch (InvalidOperationException) { }
-                try { await Task.WhenAll(stdout, stderr).ConfigureAwait(false); } catch { }
-                if (lifetime.IsCancellationRequested && !token.IsCancellationRequested) throw new McpFault("vst_timeout");
-                throw;
-            }
-            lifetime.Token.ThrowIfCancellationRequested();
-            JsonObject result;
-            try { result = JsonNode.Parse(await stdout.ConfigureAwait(false), documentOptions: new() { MaxDepth = 32 })!.AsObject(); }
-            catch (Exception e) when (e is JsonException or InvalidOperationException or NullReferenceException) { throw new McpFault("vst_worker_crashed"); }
-            if (process.ExitCode != 0 || result["ok"]?.GetValue<bool>() != true)
-            {
-                string? code = result["error"]?["code"]?.GetValue<string>();
-                throw new McpFault(code is { Length: > 0 and <= 80 } && code.All(c => char.IsAsciiLetterOrDigit(c) || c == '_') ? code : "vst_worker_failed");
-            }
+            var response = await WorkerProcess.Run(renderer!, args, sandbox, TimeSpan.FromMilliseconds(timeout), lifetime.Token, 8 * 1024 * 1024);
+            var result = JsonNode.Parse(response.GetRawText())!.AsObject();
             if (input is not null && result["phase1_passed"]?.GetValue<bool>() != true) throw new McpFault("vst_phase1_required");
             var outputs = new List<(string Name, string Kind, string Source, string Extension)>();
             if (result["files"] is JsonArray files)
@@ -173,26 +163,23 @@ public sealed partial class VstController(Workspace workspace)
                     outputs.Add((name, kind, source, extension));
                 }
             }
-            var artifacts = new JsonArray();
             foreach (var output in outputs)
             {
                 lifetime.Token.ThrowIfCancellationRequested();
                 string pending = workspace.TempFile(output.Extension);
-                try
-                {
-                    File.Copy(output.Source, pending, overwrite: false);
-                    lifetime.Token.ThrowIfCancellationRequested();
-                    var metadata = workspace.PublishFile(pending, output.Extension, output.Kind == "wav" ? "audio/wav" : "application/x-vstpreset", revision);
-                    published.Add(metadata);
-                    lifetime.Token.ThrowIfCancellationRequested();
-                    var artifact = JsonNode.Parse(metadata.GetRawText())!.AsObject(); artifact["name"] = output.Name; artifact["kind"] = output.Kind; artifacts.Add(artifact);
-                }
-                finally { File.Delete(pending); }
+                pendingFiles.Add((pending, output.Extension, output.Kind == "wav" ? "audio/wav" : "application/x-vstpreset"));
+                File.Copy(output.Source, pending, overwrite: false);
             }
-            result["artifacts"] = artifacts;
             lifetime.Token.ThrowIfCancellationRequested();
             workspace.VstAudit(tool, "completed", operations);
-            lifetime.Token.ThrowIfCancellationRequested();
+            published.AddRange(workspace.PublishBatch(pendingFiles, revision, lifetime.Token));
+            var artifacts = new JsonArray();
+            for (int index = 0; index < outputs.Count; ++index)
+            {
+                var artifact = JsonNode.Parse(published[index].GetRawText())!.AsObject();
+                artifact["name"] = outputs[index].Name; artifact["kind"] = outputs[index].Kind; artifacts.Add(artifact);
+            }
+            result["artifacts"] = artifacts;
             return JsonSerializer.SerializeToElement(result);
         }
         catch (Exception e)
@@ -200,30 +187,14 @@ public sealed partial class VstController(Workspace workspace)
             foreach (var artifact in published)
                 try { workspace.ReleaseArtifact(artifact.GetProperty("file_id").GetString()!); } catch { }
             bool timedOut = e is OperationCanceledException && lifetime.IsCancellationRequested && !token.IsCancellationRequested;
-            try { workspace.VstAudit(tool, e is McpFault fault ? fault.Code : timedOut ? "vst_timeout" : e is OperationCanceledException ? "cancelled" : "failed", operations); } catch { }
+            try { workspace.VstAudit(tool, e is McpFault fault ? fault.Code : e is WorkerFailure workerFailure ? workerFailure.Code : timedOut ? "vst_timeout" : e is OperationCanceledException ? "cancelled" : "failed", operations); } catch { }
             if (timedOut) throw new McpFault("vst_timeout");
             throw;
         }
         finally
         {
+            foreach (var pending in pendingFiles) File.Delete(pending.Path);
             if (sandbox is not null) Directory.Delete(sandbox, recursive: true);
         }
-    }
-    private static async Task<string> ReadTextAsync(StreamReader reader, int maximum, CancellationToken token)
-    {
-        var result = new StringBuilder(); char[] buffer = new char[4096]; int count;
-        while ((count = await reader.ReadAsync(buffer.AsMemory(), token).ConfigureAwait(false)) > 0)
-        {
-            if (result.Length + count > maximum) throw new McpFault("vst_output_limit");
-            result.Append(buffer, 0, count);
-        }
-        return result.ToString();
-    }
-    private static void SafeEnvironment(ProcessStartInfo info)
-    {
-        string[] retained = ["PATH", "LD_LIBRARY_PATH", "SYSTEMROOT", "WINDIR", "TEMP", "TMP", "TMPDIR", "LANG", "LC_ALL"];
-        if (OperatingSystem.IsWindows()) retained = [..retained, "APPDATA", "LOCALAPPDATA", "USERPROFILE", "PROGRAMDATA", "PUBLIC", "PROGRAMFILES", "PROGRAMFILES(X86)", "PROGRAMW6432", "COMMONPROGRAMFILES", "COMMONPROGRAMFILES(X86)", "COMMONPROGRAMW6432", "SYSTEMDRIVE"];
-        var safe = info.Environment.Where(p => retained.Contains(p.Key, StringComparer.OrdinalIgnoreCase)).ToArray();
-        info.Environment.Clear(); foreach (var entry in safe) info.Environment[entry.Key] = entry.Value;
     }
 }

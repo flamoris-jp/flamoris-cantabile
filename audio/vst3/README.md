@@ -1,3 +1,9 @@
+> Development extension (Issue #10): [installed VST3 catalog and native track projects](../../docs/VST3_PROJECTS.md)
+> add asynchronous discovery, per-track sound state, aligned float stems/mix and
+> long-running script jobs. The single-plugin examples below remain the legacy
+> compatibility path; catalog mode does not require a single Plugin setting.
+> Commercial drums/bass/keys workstation acceptance remains pending.
+
 # CantabileClient
 
 CantabileClient is a headless VST 3 instrument host. It reads one MIDI instrument
