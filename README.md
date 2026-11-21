@@ -6,12 +6,17 @@
 
 **Status: development — [v0.1.0 preview published](https://github.com/flamoris-jp/flamoris-cantabile/releases/tag/v0.1.0).** The repository is public. Linux Docker/Updater installation, 18-tool Hub access, guarded MIDI editing, save/reopen and complete MIDI/WAV retrieval have been accepted in one deployment. Human playback was confirmed; Cubase import, compatible update, controlled restart, native MCP audio/model listening and the Windows GUI remain separate gates. See [acceptance evidence](docs/ACCEPTANCE.md).
 
-**現在：公開プレビュー v0.1.0。** AIがCLI/MCPで音符やトラックを組み立て、MIDIと試聴用WAVを書き出せます。実機での編集・保存・音声取得と人による試聴を確認済みです。VST 3とWindows GUIは今後の実装です。
+**現在：公開プレビュー v0.1.0。** AIがCLI/MCPで音符やトラックを組み立て、MIDIと試聴用WAVを書き出せます。開発版のCantabileClientではVST 3による演奏、公開機能の読み取り、制限付きJSONスクリプトによる制御を実装しています。Windows GUIは未実装です。公開版・CI・商用音源の実機確認は別々に記録しています。
 
 **CantabileClient in development.** The optional headless VST 3 build runs one
-installed instrument and can render a MIDI part through CLI or MCP. Keep the
-exported MIDI to edit in Cubase. See the [Windows preview guide](audio/vst3/README.md)
-for preset setup and supported scope.
+installed instrument and can render a MIDI part through CLI or MCP. Its Inspector
+reports public parameters, MIDI mappings, buses, programs and selected standard
+interfaces. A bounded JSON operation language controls parameters, MIDI rendering
+and VST preset snapshots; writes require a separate permission. Keep exported MIDI
+to edit in Cubase. See the [Windows preview guide](audio/vst3/README.md) and
+[Inspector / Script Controller specification](docs/VST3_CONTROL.md). EZkeys 2,
+EZdrummer 3 and EZbass Inspector/Script acceptance requires separate workstation
+tests. Internal songwriting features, including Bandmate, are outside this change.
 
 Windows users can use the [GitHub CLI update launcher](audio/vst3/CantabileClient-Update.cmd)
 to fetch the latest successful main Windows build without manually downloading
@@ -39,6 +44,7 @@ Cantabile owns its music project, native typed edits and Undo/Redo, MIDI import/
 | Files | JSON project save/load; MCP workspace operations and bounded artifact transfer with digests |
 | MCP | Shared FLAMORIS permissions/guards and WSS provider; official SDK stdio; one editing authority |
 | Audio | Real offline FluidSynth + separately installed SoundFont; stereo PCM16 WAV, cancellation, result retrieval |
+| VST 3 control (development) | Read-only Inspector; bounded typed JSON operations; separate write permission; isolated worker; standard preset save/restore |
 | Distribution | Nonroot Dockerfile, Updater candidate generator, image/source/digest checks, retained data layout |
 
 ### Supported boundary / 対応範囲
@@ -47,7 +53,7 @@ Imported note-on/off messages remain raw events to preserve overlaps, unmatched 
 
 Type 2, SMPTE timing, extended/unknown chunks and malformed input fail explicitly. History is bounded and session-local; project saves do not persist Undo history.
 
-The first audio backend uses a configured SoundFont and MIDI bank/program events. **The optional CantabileClient preview adds offline VST 3 hosting with one preset. Multi-instrument VST projects, phrase arrangement, range/stem rendering and the Windows GUI remain pending.** Unsupported instrument settings fail instead of being silently substituted.
+The first audio backend uses a configured SoundFont and MIDI bank/program events. **The optional CantabileClient development build hosts one VST 3 instrument and exposes its public standard control APIs. Multi-instrument VST projects, internal phrase generation, range/stem rendering and the Windows GUI remain pending.** Unsupported instrument settings fail instead of being silently substituted.
 
 Audio creation and complete-byte retrieval have been verified independently, and the operator has listened to the retrieved audio. Native MCP audio presentation and actual model listening still require separate client acceptance; a WAV file alone does not establish that the AI heard it.
 
@@ -94,6 +100,7 @@ The WAV path must be new. No display server, sound card, GPU or model API is use
 - [Native ABI, commands, MIDI scope and limits](docs/PROTOCOL.md)
 - [MCP host setup and tools](host/README.md)
 - [Renderer and audio tests](audio/README.md)
+- [VST 3 Inspector, restricted scripts and commercial-instrument test procedure](docs/VST3_CONTROL.md)
 - [Published preview and Docker/Updater distribution](packaging/README.md)
 - [Acceptance evidence](docs/ACCEPTANCE.md)
 - [Remaining roadmap](docs/ROADMAP.md)

@@ -10,6 +10,12 @@
 #include "pluginterfaces/vst/ivstaudioprocessor.h"
 #include "pluginterfaces/vst/ivstmidicontrollers.h"
 #include "pluginterfaces/vst/ivstprocesscontext.h"
+#include "pluginterfaces/vst/ivstunits.h"
+#include "pluginterfaces/vst/ivstnoteexpression.h"
+#include "pluginterfaces/vst/ivstmessage.h"
+#include <map>
+#include <set>
+#include <limits>
 
 #include <algorithm>
 #include <array>
@@ -43,8 +49,17 @@ constexpr int sample_rate = 48000;
 constexpr int block_size = 512;
 constexpr int tail_frames = sample_rate * 2;
 using Clock = std::chrono::steady_clock;
+std::optional<Clock::time_point> script_deadline;
+json script_failure = json::object();
+std::map<ParamID, ParamValue> script_parameter_changes;
+void check_deadline() {
+    if (script_deadline && Clock::now() >= *script_deadline)
+        fail("SCRIPT_TIMEOUT", "Script execution deadline exceeded");
+}
 
 void wait_until(Clock::time_point deadline) {
+    check_deadline();
+    if (script_deadline) deadline = std::min(deadline, *script_deadline);
 #ifdef _WIN32
     for (auto now = Clock::now(); now < deadline; now = Clock::now()) {
         const auto delay = std::chrono::ceil<std::chrono::milliseconds>(deadline - now).count();
@@ -61,6 +76,7 @@ void wait_until(Clock::time_point deadline) {
 #else
     std::this_thread::sleep_until(deadline);
 #endif
+    check_deadline();
 }
 
 std::string utf8(const fs::path& path) {
@@ -69,11 +85,11 @@ std::string utf8(const fs::path& path) {
 }
 
 struct Options {
-    fs::path plugin, preset, midi, output;
+    fs::path plugin, preset, midi, output, script, workspace;
     std::string class_id;
     int max_seconds = 600;
     int warmup_ms = 0;
-    bool list = false, realtime = false;
+    bool list = false, realtime = false, inspect = false, scripting = false, allow_write = false;
 };
 
 int bounded_integer(const fs::path& value, const std::string& flag, int minimum, int maximum) {
@@ -91,8 +107,11 @@ template<typename Char>
 Options parse(int argc, Char** argv) {
     Options options;
     options.list = argc > 1 && fs::path(argv[1]) == "list";
-    for (int i = options.list ? 2 : 1; i < argc; ++i) {
+    options.inspect = argc > 1 && fs::path(argv[1]) == "inspect";
+    options.scripting = argc > 1 && fs::path(argv[1]) == "script";
+    for (int i = (options.list || options.inspect || options.scripting) ? 2 : 1; i < argc; ++i) {
         const auto flag = utf8(argv[i]);
+        if (flag == "--allow-write" && options.scripting) { options.allow_write = true; continue; }
         if (flag == "--realtime" && !options.list) {
             options.realtime = true;
             continue;
@@ -102,13 +121,16 @@ Options parse(int argc, Char** argv) {
         if (flag == "--plugin") options.plugin = value;
         else if (flag == "--class-id" && !options.list) options.class_id = utf8(value);
         else if (flag == "--preset" && !options.list) options.preset = value;
-        else if (flag == "--midi" && !options.list) options.midi = value;
-        else if (flag == "--output" && !options.list) options.output = value;
+        else if (flag == "--script" && options.scripting) options.script = value;
+        else if (flag == "--workspace" && options.scripting) options.workspace = value;
+        else if (flag == "--midi" && !options.list && !options.inspect && !options.scripting) options.midi = value;
+        else if (flag == "--output" && !options.list && !options.inspect && !options.scripting) options.output = value;
         else if (flag == "--max-seconds" && !options.list) options.max_seconds = bounded_integer(value, flag, 1, 600);
         else if (flag == "--warmup-ms" && !options.list) options.warmup_ms = bounded_integer(value, flag, 0, 30000);
         else fail("INVALID_ARGUMENT", "Unknown option: " + flag);
     }
-    if (options.plugin.empty() || (!options.list && (options.midi.empty() || options.output.empty())))
+    if (options.plugin.empty() || (options.scripting && (options.script.empty() || options.workspace.empty())) ||
+        (!options.list && !options.inspect && !options.scripting && (options.midi.empty() || options.output.empty())))
         fail("INVALID_ARGUMENT", "--plugin is required, and rendering also requires --midi and --output");
     return options;
 }
@@ -285,8 +307,8 @@ void transfer(const Message& message, std::int64_t position, int ppq,
     check(events.addEvent(event), "Cannot queue MIDI event");
 }
 
-json render(const Options& options, const Score& score, PlugProvider& provider) {
-    if (!provider.initialize()) fail("VST_LOAD_FAILED", "Cannot initialize VST instrument");
+json render(const Options& options, const Score& score, PlugProvider& provider, bool initialized = false) {
+    if (!initialized && !provider.initialize()) fail("VST_LOAD_FAILED", "Cannot initialize VST instrument");
     auto component = provider.getComponentPtr();
     auto controller = provider.getControllerPtr();
     FUnknownPtr<IAudioProcessor> processor(component);
@@ -294,7 +316,7 @@ json render(const Options& options, const Score& score, PlugProvider& provider) 
     if (!processor || component->getBusCount(kEvent, kInput) < 1 ||
         component->getBusCount(kAudio, kOutput) < 1 || processor->canProcessSampleSize(kSample32) != kResultOk)
         fail("VST_UNSUPPORTED", "VST instrument must accept events and provide 32-bit audio output");
-    if (!options.preset.empty()) {
+    if (!initialized && !options.preset.empty()) {
         auto bytes = read_file(options.preset, 128 * 1024 * 1024, "INVALID_PRESET");
         MemoryStream stream(bytes.data(), bytes.size());
         const auto id = FUID::fromTUID(provider.getClassInfo().ID().data());
@@ -325,6 +347,7 @@ json render(const Options& options, const Score& score, PlugProvider& provider) 
     if (processing != kNotImplemented) check(processing, "Cannot start VST processing");
     activation.processing = processing == kResultOk;
     if (options.warmup_ms) wait_until(Clock::now() + std::chrono::milliseconds(options.warmup_ms));
+    check_deadline();
     const auto latency = processor->getLatencySamples();
     if (latency > static_cast<uint32>(tail_frames))
         fail("VST_UNSUPPORTED", "Plugin latency exceeds two seconds");
@@ -361,6 +384,7 @@ json render(const Options& options, const Score& score, PlugProvider& provider) 
     std::array<unsigned char, block_size * 4> pcm{};
     const auto start = Clock::now();
     for (std::int64_t position = 0; position < end;) {
+        check_deadline();
         if (options.realtime) {
             const auto offset = std::chrono::duration<double>(static_cast<double>(position) / sample_rate);
             wait_until(start + std::chrono::duration_cast<Clock::duration>(offset));
@@ -374,6 +398,11 @@ json render(const Options& options, const Score& score, PlugProvider& provider) 
         const auto count = static_cast<int32>(block_end - position);
         events.clear();
         parameters.clearQueue();
+        if (position == 0) for (const auto& [id, value] : script_parameter_changes) {
+            int32 index; auto* queue = parameters.addParameterData(id, index);
+            if (!queue || queue->addPoint(0, value, index) != kResultOk)
+                fail("VST_PROCESS_FAILED", "Cannot queue script parameter");
+        }
         while (next < score.messages.size() && score.messages[next].frame < block_end)
             transfer(score.messages[next++], position, score.ppq, events, parameters, mapping);
         context.projectTimeSamples = context.continousTimeSamples = position;
@@ -411,7 +440,11 @@ json render(const Options& options, const Score& score, PlugProvider& provider) 
             {"peak", peak}, {"clipped_samples", clipped}};
 }
 
+#include "inspector_script.hpp"
+
 json run(const Options& options) {
+    std::optional<json> request;
+    if (options.scripting) request = validate_script(options);
 #ifdef _WIN32
     struct Com {
         HRESULT result = CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
@@ -439,9 +472,15 @@ json run(const Options& options) {
     if (!selected) fail("VST_UNSUPPORTED", "No matching instrument class in the VST module");
     if (options.class_id.empty() && classes.size() != 1)
         fail("VST_UNSUPPORTED", "Module contains several instruments; use list and pass --class-id");
-    auto score = schedule(options.midi, options.max_seconds);
     PluginContextFactory::instance().setPluginContext(application);
     PlugProvider provider(factory, *selected);
+    if (options.inspect || options.scripting) {
+        initialize_for_control(options, provider);
+        auto report = inspect_plugin(options, provider);
+        if (options.inspect) return report;
+        return execute_script(options, *request, provider, report);
+    }
+    auto score = schedule(options.midi, options.max_seconds);
     return render(options, score, provider);
 }
 
@@ -450,6 +489,8 @@ int main_for(int argc, Char** argv) {
     try {
         if (argc == 1 || (argc == 2 && fs::path(argv[1]) == "--help")) {
             std::cout << "cantabile-client list --plugin PATH.vst3\n"
+                         "cantabile-client inspect --plugin PATH.vst3 [--class-id ID] [--preset FILE.vstpreset]\n"
+                         "cantabile-client script --plugin PATH.vst3 --script REQUEST.json --workspace DIR [--allow-write]\n"
                          "cantabile-client --plugin PATH.vst3 [--class-id ID] [--preset FILE.vstpreset]\n"
                          "                 --midi PART.mid --output OUT.wav [--max-seconds 600]\n"
                          "                 [--realtime] [--warmup-ms 0]\n";
@@ -459,8 +500,9 @@ int main_for(int argc, Char** argv) {
         return 0;
     } catch (const std::exception& exception) {
         const auto* error = dynamic_cast<const Error*>(&exception);
-        const json result{{"ok", false}, {"error", {{"code", error ? error->code : "RENDER_FAILED"},
+        json result{{"ok", false}, {"error", {{"code", error ? error->code : "RENDER_FAILED"},
                                                   {"message", exception.what()}}}};
+        for (auto it = script_failure.begin(); it != script_failure.end(); ++it) result["error"][it.key()] = it.value();
         std::cout << result.dump(-1, ' ', false, json::error_handler_t::replace) << '\n';
         return 1;
     }

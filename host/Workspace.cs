@@ -69,8 +69,36 @@ public sealed partial class Workspace : IDisposable
     public string TempFile(string extension)
     {
         VerifyParents(exports); CheckQuota();
-        if (extension is not (".mid" or ".wav")) throw new McpFault("invalid_request");
+        if (extension is not (".mid" or ".wav" or ".vstpreset")) throw new McpFault("invalid_request");
         return Path.Combine(exports, ".pending-" + Guid.NewGuid().ToString("N") + extension);
+    }
+    public string CreateVstSandbox()
+    {
+        VerifyParents(exports); CheckQuota();
+        string path = Path.Combine(exports, ".vst-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(path);
+        if (!OperatingSystem.IsWindows()) File.SetUnixFileMode(path, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+        VerifyParents(path); return path;
+    }
+    public byte[] VstInputArtifact(string id, string extension)
+    {
+        lock (artifactGate)
+        {
+            if (!artifacts.TryGetValue(id, out var artifact)) throw new McpFault("unknown_artifact");
+            if (Path.GetExtension(artifact.Path) != extension || extension is not (".mid" or ".vstpreset")) throw new McpFault("invalid_artifact");
+            VerifyParents(exports); DemandRegular(artifact.Path);
+            byte[] bytes = ReadBounded(artifact.Path, extension == ".mid" ? MaximumMidiBytes : (int)MaximumArtifactBytes);
+            if (bytes.Length != artifact.Size || Digest(bytes) != artifact.Digest) throw new McpFault("artifact_changed");
+            return bytes;
+        }
+    }
+    public void VstAudit(string tool, string status, int operations)
+    {
+        string logs = Path.Combine(root, "logs"); VerifyParents(logs); Directory.CreateDirectory(logs); VerifyParents(logs);
+        string path = Path.Combine(logs, "vst-audit.jsonl"), previous = path + ".1";
+        DemandRegular(path); DemandRegular(previous);
+        if (File.Exists(path) && new FileInfo(path).Length >= 1024 * 1024) File.Move(path, previous, true);
+        File.AppendAllText(path, JsonSerializer.Serialize(new { utc = DateTime.UtcNow, tool, status, operations }) + "\n");
     }
     public JsonElement PublishBytes(byte[] bytes, string extension, string mimeType, long revision)
     {
@@ -143,14 +171,14 @@ public sealed partial class Workspace : IDisposable
     {
         // A completed immutable payload can be recovered even if the process stopped
         // between renaming it and writing its metadata. Never follow an arbitrary path.
-        foreach (var path in Directory.EnumerateFiles(exports).Where(p => Path.GetExtension(p) is ".mid" or ".wav").Take(129))
+        foreach (var path in Directory.EnumerateFiles(exports).Where(p => Path.GetExtension(p) is ".mid" or ".wav" or ".vstpreset").Take(129))
         {
             string id = Path.GetFileNameWithoutExtension(path);
             if (!Guid.TryParseExact(id, "N", out _)) continue;
             DemandRegular(path); var info = new FileInfo(path);
             if (info.Length > MaximumArtifactBytes || artifacts.Count >= 128) throw new McpFault("workspace_quota");
             string digest; using (var input = File.OpenRead(path)) digest = Convert.ToHexString(SHA256.HashData(input)).ToLowerInvariant();
-            string mime = Path.GetExtension(path) == ".mid" ? "audio/midi" : "audio/wav";
+            string mime = Path.GetExtension(path) switch { ".mid" => "audio/midi", ".wav" => "audio/wav", _ => "application/x-vstpreset" };
             long revision = -1;
             string manifest = Path.Combine(exports, id + ".artifact.json");
             if (File.Exists(manifest))

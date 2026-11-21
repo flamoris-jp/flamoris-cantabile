@@ -33,6 +33,21 @@ jobs:
           cmake --build build-vst --config Release --parallel 2 --target cantabile-client cantabile-cli cantabile-render cantabile-vst3-test-plugin
       - name: Build existing MCP host
         run: dotnet build host/Flamoris.Cantabile.Host.csproj -c Release
+      - name: Phase 1 gate — read-only VST3 Inspector
+        shell: pwsh
+        run: |
+          $worker = (Resolve-Path build-vst/audio/vst3/Release/cantabile-client.exe).Path
+          $plugin = (Resolve-Path build-vst/VST3/Release/mda-vst3.vst3).Path
+          python audio/vst3/tests/inspector_smoke.py $worker $plugin
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+      - name: Phase 2 — constrained script controller and state rollback
+        shell: pwsh
+        run: |
+          $worker = (Resolve-Path build-vst/audio/vst3/Release/cantabile-client.exe).Path
+          $cli = (Resolve-Path build-vst/Release/cantabile-cli.exe).Path
+          $plugin = (Resolve-Path build-vst/VST3/Release/mda-vst3.vst3).Path
+          python audio/vst3/tests/script_smoke.py $worker $cli $plugin
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
       - name: Render on Windows and retrieve WAV and MIDI through MCP
         shell: pwsh
         run: |
@@ -43,6 +58,16 @@ jobs:
           python audio/vst3/tests/smoke.py $worker $cli $plugin
           if ($LASTEXITCODE) { exit $LASTEXITCODE }
           python audio/vst3/tests/mcp_smoke.py $worker $cli $plugin $core
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+      - name: Inspector and script operations through MCP
+        shell: pwsh
+        run: |
+          $worker = (Resolve-Path build-vst/audio/vst3/Release/cantabile-client.exe).Path
+          $cli = (Resolve-Path build-vst/Release/cantabile-cli.exe).Path
+          $core = (Resolve-Path build-vst/Release/cantabile_core.dll).Path
+          $plugin = (Resolve-Path build-vst/VST3/Release/mda-vst3.vst3).Path
+          python audio/vst3/tests/control_mcp_smoke.py $worker $cli $plugin $core
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
       - name: Prepare portable preview
         shell: pwsh
         run: |
@@ -55,6 +80,8 @@ jobs:
           $jsonLicense = python -c "from importlib.metadata import distribution; d=distribution('nlohmann_json'); print(next(d.locate_file(f) for f in d.files if str(f).endswith('/licenses/LICENSE')))"
           Copy-Item $jsonLicense client-package/nlohmann-json-LICENSE.txt
           Copy-Item audio/vst3/README.md client-package/README.md
+          New-Item -ItemType Directory -Force client-package/docs | Out-Null
+          Copy-Item docs/VST3_CONTROL.md client-package/docs/VST3_CONTROL.md
           Copy-Item "$env:RUNNER_TEMP/vst3sdk/LICENSE.txt" client-package/VST3-SDK-LICENSE.txt
           Copy-Item "$env:RUNNER_TEMP/vst3sdk/base/LICENSE.txt" client-package/VST3-base-LICENSE.txt
           Copy-Item "$env:RUNNER_TEMP/vst3sdk/public.sdk/LICENSE.txt" client-package/VST3-public-sdk-LICENSE.txt
