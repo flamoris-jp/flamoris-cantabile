@@ -19,6 +19,7 @@ public sealed class EditorHost : IMcpHost, IAsyncDisposable
     private VstCatalog Catalog { get; }
     private AsyncJobs Jobs { get; } = new();
     private BandRenderer Band { get; }
+    private SoundShelf Sounds { get; }
     public McpBoundary Boundary { get; }
     public HostSnapshot Snapshot => new("flamoris.cantabile", "0.1.0", runtimeId, documentToken, engine.Revision);
     public event Action? Invalidating;
@@ -28,6 +29,7 @@ public sealed class EditorHost : IMcpHost, IAsyncDisposable
         {
             workspace = new Workspace(directory); Renders = new RenderJobs(workspace); Vst = new VstController(workspace);
             Catalog = new VstCatalog(workspace); Band = new BandRenderer(workspace, Catalog);
+            Sounds = new SoundShelf(workspace, Catalog);
             var saved = workspace.ReadProject(workspace.ActiveName);
             if (saved is { } loaded)
             {
@@ -84,7 +86,11 @@ public sealed class EditorHost : IMcpHost, IAsyncDisposable
         if (!input.TryGetProperty("track_id", out _)) return (null, null);
         var track = Track(Text(input, "track_id"));
         if (!track.TryGetProperty("instrument", out var instrument) || !instrument.TryGetProperty("catalog_id", out var id)) throw new McpFault("instrument_unassigned");
-        return (Catalog.Resolve(id.GetString()!), BandRenderer.State(instrument));
+        var entry = Catalog.Resolve(id.GetString()!);
+        if (instrument.TryGetProperty("plugin_version", out var version) && version.GetString() != entry.Version) throw new McpFault("sound_version_mismatch");
+        byte[]? state = BandRenderer.State(instrument);
+        if (state is not null) SoundShelf.ValidateState(state, entry.ClassId);
+        return (entry, state);
     }
     private byte[] TargetMidi(JsonElement input)
     {
@@ -104,9 +110,12 @@ public sealed class EditorHost : IMcpHost, IAsyncDisposable
     {
         string trackId = Text(input, "track_id"), fileId = Text(input, "file_id", 32);
         var target = Target(input); byte[] bytes = workspace.VstInputArtifact(fileId, ".vstpreset");
-        if (bytes.Length is < 48 or > 1024 * 1024 || System.Text.Encoding.ASCII.GetString(bytes, 0, 4) != "VST3" ||
-            !System.Text.Encoding.ASCII.GetString(bytes, 8, 32).Equals(target.Entry!.ClassId, StringComparison.OrdinalIgnoreCase)) throw new McpFault("invalid_instrument_state");
-        return UpdateInstrument(trackId, new { backend = "vst3", catalog_id = target.Entry!.Id, state_base64 = Convert.ToBase64String(bytes) });
+        SoundShelf.ValidateState(bytes, target.Entry!.ClassId);
+        // Retain loading conditions, but a newly supplied state no longer has
+        // the previously assigned shelf identity.
+        var instrument = JsonNode.Parse(Track(trackId).GetProperty("instrument").GetRawText())!.AsObject();
+        instrument.Remove("sound_id"); instrument["state_base64"] = Convert.ToBase64String(bytes);
+        return UpdateInstrument(trackId, instrument);
     }
     private JsonElement RenderStatus(string id)
     {
@@ -250,6 +259,58 @@ public sealed class EditorHost : IMcpHost, IAsyncDisposable
                     progress(1, 1); return Identified(result, x);
                 });
             }));
+        foreach (var tool in SoundTools()) yield return tool;
+    }
+    private static JsonElement SoundInput(Func<JsonElement, JsonElement> validate, JsonElement input)
+    {
+        try { return validate(input); }
+        catch (Exception e) when (e is InvalidOperationException or KeyNotFoundException or FormatException or OverflowException) { throw new ArgumentException("Invalid sound input."); }
+    }
+    private IEnumerable<HostTool> SoundTools()
+    {
+        var text = new { type = "string", minLength = 1, maxLength = 128 };
+        var labels = new { type = "array", maxItems = 16, items = new { type = "string", minLength = 1, maxLength = 64 } };
+        yield return new HostTool<JsonElement>("sound_register", "Retain a private independent copy of a track's standard state or state artifact. Returns a stable sound ID; never exposes state bytes or local paths. Registration does not certify audible restoration.",
+            Schema(new { track_id = text, file_id = new { type = "string", maxLength = 32 }, display_name = text, category = new { type = "string", minLength = 1, maxLength = 64 },
+                roles = labels, tags = labels, classification_source = new { type = "string", minLength = 1, maxLength = 512 },
+                warmup_ms = new { type = "integer", minimum = 0, maximum = 30000 }, realtime = new { type = "boolean" } }, ["track_id", "display_name", "category", "classification_source"]),
+            OperationKind.Transaction, x => SoundInput(SoundShelf.RegisterInput, x), (ctx, x, _) => ctx.CommitAsync(() => {
+                var target = Target(x);
+                byte[] state = x.TryGetProperty("file_id", out var file) ? workspace.VstInputArtifact(file.GetString()!, ".vstpreset") : target.State ?? throw new McpFault("sound_state_required");
+                return Sounds.Register(x, target.Entry!, state);
+            }));
+        yield return new HostTool<JsonElement>("sound_search", "Search individual saved sounds by category, role, tag and verification. Returns availability, state digest and loading conditions, never paths or state payloads.",
+            Schema(new { category = text, role = text, tag = text, verification = new { type = "string", @enum = new[] { "initial_audible", "state_captured", "restored_audible", "human_reviewed", "unverified" } },
+                offset = new { type = "integer", minimum = 0, maximum = 128 }, limit = new { type = "integer", minimum = 1, maximum = 32 } }),
+            OperationKind.Query, x => SoundInput(SoundShelf.SearchInput, x), (ctx, x, _) => ctx.ReadAsync(() => Sounds.Search(x)), foreground: false);
+        yield return new HostTool<JsonElement>("sound_assign", "Atomically apply one saved sound and its loading conditions to a native track. One Undo/Redo entry; mixer settings remain independent. Unverified restoration is reported, never implied by assignment.",
+            Schema(new { sound_id = text, track_id = text }, ["sound_id", "track_id"]), OperationKind.Transaction,
+            x => { Decode(x, "sound_id", "track_id"); _ = Text(x, "sound_id"); _ = Text(x, "track_id"); return x; },
+            (ctx, x, _) => ctx.CommitAsync(() => {
+                var target = Sounds.Resolve(Text(x, "sound_id"));
+                var result = UpdateInstrument(Text(x, "track_id"), SoundShelf.Instrument(target.Sound));
+                return JsonSerializer.SerializeToElement(new { edit = result, sound_id = target.Sound.SoundId,
+                    restoration = target.Sound.Verification.RestoredAudible ? "operator_verified" : "unverified" });
+            }));
+        yield return new HostTool<JsonElement>("sound_preview", "Render a saved state with original fixed melody, bass or drum notes in an isolated async job. Preserves the current project, revision and history. Poll audio_status/vst_job_status; cancel with audio_cancel/vst_job_cancel; retrieve mix/stem using file_read.",
+            Schema(new { sound_id = text, phrase = new { type = "string", @enum = new[] { "melody", "bass", "drums" } } }, ["sound_id", "phrase"]), OperationKind.Transaction,
+            x => { Decode(x, "sound_id", "phrase"); _ = Text(x, "sound_id"); if (Text(x, "phrase") is not ("melody" or "bass" or "drums")) throw new ArgumentException(); return x; },
+            (ctx, x, _) => ctx.CommitAsync(() => {
+                var target = Sounds.Resolve(Text(x, "sound_id")); byte[] midi = SoundShelf.PreviewMidi(Text(x, "phrase")); long revision = engine.Revision;
+                var parts = new[] { new BandRenderer.Part("preview", target.Instrument, target.State, midi, 0.5, 0, target.Sound.WarmupMs, target.Sound.Realtime) };
+                return Jobs.Begin("sound_preview", revision, async (progress, token) => {
+                    var result = await Band.Run(parts, revision, 10, progress, token);
+                    return JsonSerializer.SerializeToElement(new { sound_id = target.Sound.SoundId, state_sha256 = target.Sound.StateSha256, render = result });
+                });
+            }));
+        yield return new HostTool<JsonElement>("sound_verify", "Record explicit operator evidence separately for initial audibility, restored audibility and human review. These are attestations, not automatic tests or proof of preset identity.",
+            Schema(new { sound_id = text, initial_audible = new { type = "boolean" }, restored_audible = new { type = "boolean" }, human_reviewed = new { type = "boolean" },
+                evidence = new { type = "string", minLength = 1, maxLength = 1024 } }, ["sound_id", "initial_audible", "restored_audible", "human_reviewed", "evidence"]),
+            OperationKind.Mutation, x => SoundInput(SoundShelf.VerifyInput, x), (ctx, x, _) => ctx.CommitAsync(() => Sounds.Verify(x)));
+        yield return new HostTool<JsonElement>("sound_remove", "Delete one retained sound using its expected state SHA-256. Existing project copies and already-started previews retain their snapshots. Not undone by native project history.",
+            Schema(new { sound_id = text, expected_sha256 = new { type = "string", minLength = 64, maxLength = 64 } }, ["sound_id", "expected_sha256"]), OperationKind.Mutation,
+            x => { Decode(x, "sound_id", "expected_sha256"); _ = Text(x, "sound_id"); string hash = Text(x, "expected_sha256", 64); if (hash.Length != 64 || !hash.All(char.IsAsciiHexDigit)) throw new ArgumentException(); return x; },
+            (ctx, x, _) => ctx.CommitAsync(() => Sounds.Remove(Text(x, "sound_id"), Text(x, "expected_sha256", 64))));
     }
     private void DemandDiscard(JsonElement input) { if (Dirty && !Field(input, "discard_unsaved").GetBoolean()) throw new McpFault("unsaved_changes"); }
     public RequestGuard CurrentGuard() => new(runtimeId, documentToken, engine.Revision);

@@ -7,7 +7,7 @@ namespace Flamoris.Cantabile.Host;
 public sealed class BandRenderer(Workspace workspace, VstCatalog catalog)
 {
     private readonly string? worker = Environment.GetEnvironmentVariable("CANTABILE_RENDERER");
-    internal sealed record Part(string TrackId, VstCatalog.Entry Instrument, byte[]? State, byte[] Midi, double Volume, double Pan);
+    internal sealed record Part(string TrackId, VstCatalog.Entry Instrument, byte[]? State, byte[] Midi, double Volume, double Pan, int? WarmupMs = null, bool? Realtime = null);
     internal Part[] Prepare(JsonElement plan)
     {
         if (!File.Exists(worker)) throw new McpFault("vst_backend_unavailable");
@@ -18,8 +18,13 @@ public sealed class BandRenderer(Workspace workspace, VstCatalog catalog)
             VstCatalog.Entry entry;
             try { entry = catalog.Resolve(id.GetString()!); }
             catch (McpFault failure) { throw TrackFailure(failure.Code, track); }
-            return new Part(track, entry, State(instrument), Convert.FromBase64String(p.GetProperty("midi_base64").GetString()!),
-                p.GetProperty("volume").GetDouble(), p.GetProperty("pan").GetDouble());
+            if (instrument.TryGetProperty("plugin_version", out var version) && version.GetString() != entry.Version) throw TrackFailure("sound_version_mismatch", track);
+            byte[]? state = State(instrument);
+            if (state is not null) { try { SoundShelf.ValidateState(state, entry.ClassId); } catch (McpFault failure) { throw TrackFailure(failure.Code, track); } }
+            return new Part(track, entry, state, Convert.FromBase64String(p.GetProperty("midi_base64").GetString()!),
+                p.GetProperty("volume").GetDouble(), p.GetProperty("pan").GetDouble(),
+                instrument.TryGetProperty("warmup_ms", out var warmup) ? warmup.GetInt32() : null,
+                instrument.TryGetProperty("realtime", out var realtime) ? realtime.GetBoolean() : null);
         }).ToArray();
         if (parts.Length is < 1 or > 32) throw new McpFault("render_track_limit");
         return parts;
@@ -47,11 +52,12 @@ public sealed class BandRenderer(Workspace workspace, VstCatalog catalog)
                     string state = Path.Combine(sandbox, $"{i}.vstpreset"); await File.WriteAllBytesAsync(state, part.State, token);
                     arguments.AddRange(["--preset", state]);
                 }
-                if (realtime) arguments.Add("--realtime");
-                arguments.AddRange(["--warmup-ms", warmup.ToString(System.Globalization.CultureInfo.InvariantCulture)]);
+                int partWarmup = part.WarmupMs ?? warmup;
+                if (part.Realtime ?? realtime) arguments.Add("--realtime");
+                arguments.AddRange(["--warmup-ms", partWarmup.ToString(System.Globalization.CultureInfo.InvariantCulture)]);
                 try
                 {
-                    var result = await WorkerProcess.Run(worker!, arguments, sandbox, TimeSpan.FromSeconds(maximumSeconds + 30) + TimeSpan.FromMilliseconds(warmup), token);
+                    var result = await WorkerProcess.Run(worker!, arguments, sandbox, TimeSpan.FromSeconds(maximumSeconds + 30) + TimeSpan.FromMilliseconds(partWarmup), token);
                     if (result.GetProperty("backend").GetString() != "vst3" || result.GetProperty("sample_format").GetString() != "ieee_float32le") throw new McpFault("invalid_audio");
                     Workspace.DemandRegular(output);
                     long size = new FileInfo(output).Length;

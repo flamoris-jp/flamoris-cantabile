@@ -581,12 +581,16 @@ class NativeInteropTests(unittest.TestCase):
     def test_catalog_instruments_mixer_settings_state_and_history(self):
         state = base64.b64encode(b"VST3" + b"\0" * 44).decode()
         self.loaded({"schema_version": 1, "ppq": 480, "tracks": [{"id": "a", "events": []}]})
-        instrument = {"backend": "vst3", "catalog_id": "vst3-test", "state_base64": state}
+        instrument = {"backend": "vst3", "catalog_id": "vst3-test", "state_base64": state,
+                      "sound_id": "sound-test", "plugin_version": "1.2.3", "warmup_ms": 500, "realtime": True}
         self.good(self.edit({"op": "track.update", "track_id": "a", "patch": {"instrument": instrument, "volume": 0.4, "pan": -0.5}}))
         saved = self.project()
         for patch in ({"volume": -1}, {"volume": 5}, {"volume": True}, {"pan": 2}, {"render_channel": 16},
                       {"instrument": {**instrument, "module": "private.vst3"}},
-                      {"instrument": {**instrument, "state_base64": "AA=="}}):
+                      {"instrument": {**instrument, "state_base64": "AA=="}},
+                      *({"instrument": {**instrument, "warmup_ms": v}} for v in (-1, 30001, True, 0.5)),
+                      {"instrument": {**instrument, "realtime": "true"}},
+                      {"instrument": {**instrument, "sound_id": "../private"}}):
             self.assertFalse(self.edit({"op": "track.update", "track_id": "a", "patch": patch})["ok"])
             self.assertEqual(self.project(), saved)
         self.good(self.edit({"op": "track.update", "track_id": "a", "patch": {"instrument": None}}))

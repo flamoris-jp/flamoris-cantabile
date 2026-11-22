@@ -76,6 +76,14 @@ jobs:
           $plugin = (Resolve-Path build-vst/VST3/Release/mda-vst3.vst3).Path
           python audio/vst3/tests/band_mcp_smoke.py $worker $plugin $core
           if ($LASTEXITCODE) { exit $LASTEXITCODE }
+      - name: Durable sound shelf, changed-state audio and new-session restoration
+        shell: pwsh
+        run: |
+          $worker = (Resolve-Path build-vst/audio/vst3/Release/cantabile-client.exe).Path
+          $core = (Resolve-Path build-vst/Release/cantabile_core.dll).Path
+          $plugin = (Resolve-Path build-vst/VST3/Release/mda-vst3.vst3).Path
+          python audio/vst3/tests/sound_shelf_smoke.py $worker $plugin $core
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
       - name: Prepare portable preview
         shell: pwsh
         run: |
@@ -91,6 +99,7 @@ jobs:
           New-Item -ItemType Directory -Force client-package/docs | Out-Null
           Copy-Item docs/VST3_CONTROL.md client-package/docs/VST3_CONTROL.md
           Copy-Item docs/VST3_PROJECTS.md client-package/docs/VST3_PROJECTS.md
+          Copy-Item docs/SOUND_SHELF.md client-package/docs/SOUND_SHELF.md
           Copy-Item "$env:RUNNER_TEMP/vst3sdk/LICENSE.txt" client-package/VST3-SDK-LICENSE.txt
           Copy-Item "$env:RUNNER_TEMP/vst3sdk/base/LICENSE.txt" client-package/VST3-base-LICENSE.txt
           Copy-Item "$env:RUNNER_TEMP/vst3sdk/public.sdk/LICENSE.txt" client-package/VST3-public-sdk-LICENSE.txt

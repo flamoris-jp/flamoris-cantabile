@@ -1565,6 +1565,473 @@
         "destructiveHint": true,
         "openWorldHint": false
       }
+    },
+    {
+      "name": "sound_register",
+      "description": "Retain a private independent copy of a track's standard state or state artifact. Returns a stable sound ID; never exposes state bytes or local paths. Registration does not certify audible restoration.",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "input": {
+            "type": "object",
+            "properties": {
+              "track_id": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 128
+              },
+              "file_id": {
+                "type": "string",
+                "maxLength": 32
+              },
+              "display_name": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 128
+              },
+              "category": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 64
+              },
+              "roles": {
+                "type": "array",
+                "maxItems": 16,
+                "items": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 64
+                }
+              },
+              "tags": {
+                "type": "array",
+                "maxItems": 16,
+                "items": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 64
+                }
+              },
+              "classification_source": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 512
+              },
+              "warmup_ms": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 30000
+              },
+              "realtime": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "track_id",
+              "display_name",
+              "category",
+              "classification_source"
+            ],
+            "additionalProperties": false
+          },
+          "guard": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "runtimeId": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 128
+              },
+              "documentToken": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 128
+              },
+              "expectedRevision": {
+                "type": "string",
+                "pattern": "^(0|[1-9][0-9]*)$",
+                "maxLength": 19
+              }
+            },
+            "required": [
+              "runtimeId",
+              "documentToken",
+              "expectedRevision"
+            ]
+          }
+        },
+        "additionalProperties": false,
+        "required": [
+          "input",
+          "guard"
+        ]
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "sound_search",
+      "description": "Search individual saved sounds by category, role, tag and verification. Returns availability, state digest and loading conditions, never paths or state payloads.",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "input": {
+            "type": "object",
+            "properties": {
+              "category": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 128
+              },
+              "role": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 128
+              },
+              "tag": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 128
+              },
+              "verification": {
+                "type": "string",
+                "enum": [
+                  "initial_audible",
+                  "state_captured",
+                  "restored_audible",
+                  "human_reviewed",
+                  "unverified"
+                ]
+              },
+              "offset": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 128
+              },
+              "limit": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 32
+              }
+            },
+            "required": [],
+            "additionalProperties": false
+          },
+          "guard": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "runtimeId": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 128
+              },
+              "documentToken": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 128
+              },
+              "expectedRevision": {
+                "type": "string",
+                "pattern": "^(0|[1-9][0-9]*)$",
+                "maxLength": 19
+              }
+            },
+            "required": [
+              "runtimeId",
+              "documentToken"
+            ]
+          }
+        },
+        "additionalProperties": false,
+        "required": [
+          "input"
+        ]
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "sound_assign",
+      "description": "Atomically apply one saved sound and its loading conditions to a native track. One Undo/Redo entry; mixer settings remain independent. Unverified restoration is reported, never implied by assignment.",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "input": {
+            "type": "object",
+            "properties": {
+              "sound_id": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 128
+              },
+              "track_id": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 128
+              }
+            },
+            "required": [
+              "sound_id",
+              "track_id"
+            ],
+            "additionalProperties": false
+          },
+          "guard": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "runtimeId": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 128
+              },
+              "documentToken": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 128
+              },
+              "expectedRevision": {
+                "type": "string",
+                "pattern": "^(0|[1-9][0-9]*)$",
+                "maxLength": 19
+              }
+            },
+            "required": [
+              "runtimeId",
+              "documentToken",
+              "expectedRevision"
+            ]
+          }
+        },
+        "additionalProperties": false,
+        "required": [
+          "input",
+          "guard"
+        ]
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "sound_preview",
+      "description": "Render a saved state with original fixed melody, bass or drum notes in an isolated async job. Preserves the current project, revision and history. Poll audio_status/vst_job_status; cancel with audio_cancel/vst_job_cancel; retrieve mix/stem using file_read.",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "input": {
+            "type": "object",
+            "properties": {
+              "sound_id": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 128
+              },
+              "phrase": {
+                "type": "string",
+                "enum": [
+                  "melody",
+                  "bass",
+                  "drums"
+                ]
+              }
+            },
+            "required": [
+              "sound_id",
+              "phrase"
+            ],
+            "additionalProperties": false
+          },
+          "guard": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "runtimeId": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 128
+              },
+              "documentToken": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 128
+              },
+              "expectedRevision": {
+                "type": "string",
+                "pattern": "^(0|[1-9][0-9]*)$",
+                "maxLength": 19
+              }
+            },
+            "required": [
+              "runtimeId",
+              "documentToken",
+              "expectedRevision"
+            ]
+          }
+        },
+        "additionalProperties": false,
+        "required": [
+          "input",
+          "guard"
+        ]
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "sound_verify",
+      "description": "Record explicit operator evidence separately for initial audibility, restored audibility and human review. These are attestations, not automatic tests or proof of preset identity.",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "input": {
+            "type": "object",
+            "properties": {
+              "sound_id": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 128
+              },
+              "initial_audible": {
+                "type": "boolean"
+              },
+              "restored_audible": {
+                "type": "boolean"
+              },
+              "human_reviewed": {
+                "type": "boolean"
+              },
+              "evidence": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 1024
+              }
+            },
+            "required": [
+              "sound_id",
+              "initial_audible",
+              "restored_audible",
+              "human_reviewed",
+              "evidence"
+            ],
+            "additionalProperties": false
+          },
+          "guard": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "runtimeId": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 128
+              },
+              "documentToken": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 128
+              },
+              "expectedRevision": {
+                "type": "string",
+                "pattern": "^(0|[1-9][0-9]*)$",
+                "maxLength": 19
+              }
+            },
+            "required": [
+              "runtimeId",
+              "documentToken",
+              "expectedRevision"
+            ]
+          }
+        },
+        "additionalProperties": false,
+        "required": [
+          "input",
+          "guard"
+        ]
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "sound_remove",
+      "description": "Delete one retained sound using its expected state SHA-256. Existing project copies and already-started previews retain their snapshots. Not undone by native project history.",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "input": {
+            "type": "object",
+            "properties": {
+              "sound_id": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 128
+              },
+              "expected_sha256": {
+                "type": "string",
+                "minLength": 64,
+                "maxLength": 64
+              }
+            },
+            "required": [
+              "sound_id",
+              "expected_sha256"
+            ],
+            "additionalProperties": false
+          },
+          "guard": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "runtimeId": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 128
+              },
+              "documentToken": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 128
+              },
+              "expectedRevision": {
+                "type": "string",
+                "pattern": "^(0|[1-9][0-9]*)$",
+                "maxLength": 19
+              }
+            },
+            "required": [
+              "runtimeId",
+              "documentToken",
+              "expectedRevision"
+            ]
+          }
+        },
+        "additionalProperties": false,
+        "required": [
+          "input",
+          "guard"
+        ]
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "openWorldHint": false
+      }
     }
   ]
 }
