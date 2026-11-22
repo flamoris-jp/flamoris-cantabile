@@ -56,6 +56,14 @@ public sealed partial class Workspace : IDisposable
         if (bytes.Length > 4 * 1024 * 1024) throw new McpFault("catalog_limit");
         AtomicWrite(Path.Combine(root, "vst3-catalog.json"), bytes, overwrite: true);
     }
+    // Private product data; separate retention/quota from temporary exports.
+    internal string SoundDirectory()
+    {
+        string path = Path.Combine(root, "sounds"); VerifyParents(path);
+        Directory.CreateDirectory(path); VerifyParents(path);
+        if (!OperatingSystem.IsWindows()) File.SetUnixFileMode(path, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+        return path;
+    }
     public object Save(JsonElement project, string? saveAs = null)
     {
         string name = saveAs ?? ActiveName, path = ProjectPath(name);
@@ -237,12 +245,16 @@ public sealed partial class Workspace : IDisposable
         while ((count = stream.Read(buffer)) != 0) { if (output.Length + count > maximum) throw new McpFault("file_too_large"); output.Write(buffer, 0, count); }
         return output.ToArray();
     }
-    private static void AtomicWrite(string path, byte[] bytes, bool overwrite)
+    internal static void AtomicWrite(string path, byte[] bytes, bool overwrite)
     {
         DemandRegular(path); string temporary = Path.Combine(Path.GetDirectoryName(path)!, ".writing-" + Guid.NewGuid().ToString("N"));
         try
         {
-            using (var output = new FileStream(temporary, FileMode.CreateNew, FileAccess.Write, FileShare.None)) { output.Write(bytes); output.Flush(true); }
+            using (var output = new FileStream(temporary, FileMode.CreateNew, FileAccess.Write, FileShare.None))
+            {
+                if (!OperatingSystem.IsWindows()) File.SetUnixFileMode(temporary, UnixFileMode.UserRead | UnixFileMode.UserWrite);
+                output.Write(bytes); output.Flush(true);
+            }
             DemandRegular(path); VerifyParents(Path.GetDirectoryName(path)!); File.Move(temporary, path, overwrite);
         }
         finally { File.Delete(temporary); }

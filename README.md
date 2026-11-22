@@ -20,6 +20,11 @@ Public test-plugin verification and commercial-instrument workstation acceptance
 remain separate. Internal songwriting features, including Bandmate, are outside
 this change. Production band acceptance is pending.
 
+The development host also implements a [private sound shelf](docs/SOUND_SHELF.md):
+durable individual states, category/role/tag search, isolated previews, and atomic
+sound-to-track assignment with native Undo/Redo. State capture, restored audibility
+and human review remain separate evidence; commercial-instrument acceptance is pending.
+
 Windows users can use the [GitHub CLI update launcher](audio/vst3/CantabileClient-Update.cmd)
 to fetch the latest successful main Windows build without manually downloading
 ZIPs. See [authentication, update selection and fallback behavior](audio/vst3/README.md#updating-on-windows-without-manually-downloading-zips).

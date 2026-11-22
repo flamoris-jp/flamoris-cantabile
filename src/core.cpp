@@ -60,9 +60,14 @@ void validate_instrument(const json& instrument) {
     // VST instances use a closed, portable contract with no machine paths.
     if (!instrument.contains("catalog_id")) return;
     for (auto it = instrument.begin(); it != instrument.end(); ++it)
-        require(it.key() == "backend" || it.key() == "catalog_id" || it.key() == "state_base64", "Unknown catalog instrument field");
+        require(it.key() == "backend" || it.key() == "catalog_id" || it.key() == "state_base64" ||
+                it.key() == "sound_id" || it.key() == "plugin_version" || it.key() == "warmup_ms" || it.key() == "realtime", "Unknown catalog instrument field");
     require(instrument.value("backend", "") == "vst3", "Catalog instruments require VST3");
     require(valid_id(string_field(instrument, "catalog_id", 128)), "Invalid catalog ID");
+    if (instrument.contains("sound_id")) require(valid_id(string_field(instrument, "sound_id", 128)), "Invalid sound ID");
+    if (instrument.contains("plugin_version")) string_field(instrument, "plugin_version", 256);
+    if (instrument.contains("warmup_ms")) field_number(instrument, "warmup_ms", 0, 30000);
+    if (instrument.contains("realtime")) require(instrument["realtime"].is_boolean(), "Invalid real-time setting");
     if (instrument.contains("state_base64")) {
         auto text = string_field(instrument, "state_base64", 1398104);
         try {

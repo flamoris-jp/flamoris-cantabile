@@ -1,5 +1,9 @@
 # Catalog-backed VST3 projects (development, Issue #10)
 
+Issue #12 adds a [private sound shelf](SOUND_SHELF.md). Its assignments embed
+standard state and optional sound ID, plugin version and loading conditions in
+the native project; existing projects retain their previous render behavior.
+
 This is an implemented development contract, separate from the published v0.1.0
 preview and from commercial-instrument workstation acceptance. It supports one
 instrument instance per musical track, sequential isolated rendering, aligned
