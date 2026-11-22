@@ -22,7 +22,8 @@ No tool accepts an arbitrary local path.
 | `sound_remove` | `sound_id`, `expected_sha256` | Delete a shelf copy using its state digest; never delete project copies |
 
 Registration optionally accepts `roles`/`tags` (at most 16 labels of 64 characters
-each), `warmup_ms` (`0..30000`, default 0) and `realtime` (default false).
+each), `warmup_ms` and `preroll_ms` (each `0..30000`, default 0), and `realtime`
+(default false).
 Classification source is required. Do not label unreviewed sounds with guessed
 timbre tags. Plugin class, catalog ID and version come from the host registry,
 not caller-supplied identity fields. `file_id` must be a retained state artifact
@@ -70,7 +71,7 @@ and deletion do not belong to native project Undo/Redo. `sound_assign` does.
 Back up the private workspace to preserve the shelf between installations.
 
 On assignment the native instrument contains `sound_id`, `plugin_version`,
-`warmup_ms` and `realtime` alongside `backend`, `catalog_id`, `state_base64`.
+`warmup_ms`, `preroll_ms` and `realtime` alongside `backend`, `catalog_id`, `state_base64`.
 These additive fields survive save/reopen and Undo/Redo. Removing the shelf
 entry does not invalidate the saved project. Newly setting a state through
 `instrument_state_set` removes the previous shelf identity while preserving
@@ -78,11 +79,19 @@ loading settings. Plain `instrument_assign` resets the old instrument state.
 Older native engines reject the new fields explicitly: update core and host
 together. Old projects without these fields retain host-wide render settings.
 
-Per-sound warmup is a startup wait before processing. It is **not** a guarantee
-that a plugin which needs processed preroll will initialize correctly. It adds
-no MIDI silence and does not shift song origin. Validate actual initial notes,
-sample readiness and tails on the target workstation. No hidden fallback or
-automatic trimming is applied.
+Per-sound `warmup_ms` remains a startup wait before processing. `preroll_ms`
+additionally processes silent blocks in real elapsed time before musical frame
+zero. Transport is stopped, no notes are synthesized, and preroll audio is
+discarded. Continuous sample time stays monotonic; project sample/music time
+starts at zero for playback. No silent frames are added to the exported file.
+This also applies to targeted Script renders. Validate the required duration,
+actual initial notes, sample readiness and tails on the target workstation;
+neither an idle wait nor a preset load alone proves sampler readiness. Old
+shelf entries/projects without `preroll_ms` default to zero. Worker wall-clock
+budgets include both startup wait and processing preroll; Script's existing
+total deadline still includes all operations. CLI workers expose the same
+bounded `--preroll-ms 0..30000` option. Cancellation checks run between blocks
+and during paced waits, with existing supervisor cleanup and publication rules.
 
 ## Failures and evidence
 

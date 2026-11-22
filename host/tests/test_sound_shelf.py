@@ -45,6 +45,7 @@ else:
         data = pathlib.Path(args[args.index('--preset')+1]).read_bytes()
         value = struct.unpack_from('<f',data,48)[0]
     if value > 0.7: time.sleep(20)
+    if value == 0.25 and ('--preroll-ms' not in args or int(args[args.index('--preroll-ms')+1]) < 250): value = 0
     data = struct.pack('<200f',*([value]*200))
     output = pathlib.Path(args[args.index('--output')+1])
     output.write_bytes(struct.pack('<4sI4s4sIHHIIHH4sI',b'RIFF',36+len(data),b'WAVE',b'fmt ',16,3,2,48000,384000,8,32,b'data',len(data))+data)
@@ -98,13 +99,13 @@ class SoundShelfTests(unittest.TestCase):
             time.sleep(0.025)
         self.fail('job deadline')
 
-    def register(self, value=0.125):
+    def register(self, value=0.125, preroll=0):
         result = self.client.tool('vst_script_write', {'track_id':'p0',**script(
             {'op':'set_parameter','id':0,'value':value},{'op':'save_state','name':'saved.vstpreset'})})
         artifact = result['artifacts'][0]
         sound = self.client.tool('sound_register', {'track_id':'p0','file_id':artifact['file_id'],
             'display_name':f'Fixture {value}','category':'keys','roles':['chords'],'tags':[],
-            'classification_source':'fixture metadata; no timbre review','warmup_ms':4,'realtime':False})
+            'classification_source':'fixture metadata; no timbre review','warmup_ms':4,'realtime':False,'preroll_ms':preroll})
         self.client.tool('file_release', {'file_id':artifact['file_id']})
         self.assertEqual(sound['state']['sha256'], artifact['sha256'])
         return sound
@@ -205,6 +206,26 @@ class SoundShelfTests(unittest.TestCase):
         self.wait(job,'cancelled')
         self.assertEqual(self.client.tool('file_list', {},guard=False),files)
         self.assertEqual(self.project(),before)
+
+    def test_processed_preroll_reaches_preview_project_render_and_survives_restart(self):
+        import struct
+        a=self.register(0.25,preroll=250)
+        self.assertEqual(a['loading']['preroll_ms'],250)
+        before=self.project()
+        result=self.wait(self.client.tool('sound_preview', {'sound_id':a['sound_id'],'phrase':'bass'}))['result']
+        data=self.client.download(result['render']['artifact']['file_id'],chunk=131072)
+        self.assertGreater(struct.unpack_from('<h',data,44)[0],0)
+        self.assertEqual(self.project(),before)
+        self.client.tool('sound_assign', {'sound_id':a['sound_id'],'track_id':'p0'})
+        self.client.tool('edit_batch', {'commands':[{'op':'track.update','track_id':'p1','patch':{'muted':True}}]})
+        self.assertEqual(self.project()['project']['tracks'][0]['instrument']['preroll_ms'],250)
+        self.client.tool('project_save', {}); self.start()
+        data=self.client.download(self.wait(self.client.tool('audio_render', {}))['result']['artifact']['file_id'],chunk=131072)
+        self.assertGreater(struct.unpack_from('<h',data,44)[0],0)
+        self.failure('sound_register', {'track_id':'p0','display_name':'bad','category':'keys','classification_source':'fixture','preroll_ms':30001},'invalid_request')
+        # Pre-preroll records remain compatible and default to zero.
+        path=self.workspace/'sounds'/f"{a['sound_id']}.json";entry=json.loads(path.read_text());del entry['PrerollMs'];path.write_text(json.dumps(entry))
+        self.assertEqual(self.client.tool('sound_search', {},guard=False)['sounds'][0]['loading']['preroll_ms'],0)
 
     def test_attestations_are_distinct_and_readonly_cannot_mutate(self):
         a=self.register()

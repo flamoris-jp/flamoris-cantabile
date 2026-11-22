@@ -15,7 +15,7 @@ public sealed class SoundShelf(Workspace workspace, VstCatalog catalog)
     public sealed record Verification(bool InitialAudible, bool RestoredAudible, bool HumanReviewed, string Evidence, string? CheckedAt);
     public sealed record Entry(string SoundId, string DisplayName, string Category, string[] Roles, string[] Tags,
         string ClassificationSource, string CatalogId, string ClassId, string PluginVersion, string StateBase64,
-        string StateSha256, int StateSize, int WarmupMs, bool Realtime, string CreatedAt, Verification Verification);
+        string StateSha256, int StateSize, int WarmupMs, bool Realtime, string CreatedAt, Verification Verification, int PrerollMs = 0);
     private string FilePath(string id)
     {
         if (!id.StartsWith("sound-", StringComparison.Ordinal) || !Guid.TryParseExact(id[6..], "N", out _)) throw new McpFault("invalid_sound_id");
@@ -28,7 +28,7 @@ public sealed class SoundShelf(Workspace workspace, VstCatalog catalog)
         try
         {
             var entry = JsonSerializer.Deserialize<Entry>(Workspace.ReadBounded(path, MaximumRecordBytes)) ?? throw new JsonException();
-            if (entry.SoundId != id || entry.StateSize is < 48 or > MaximumStateBytes || entry.WarmupMs is < 0 or > 30000 ||
+            if (entry.SoundId != id || entry.StateSize is < 48 or > MaximumStateBytes || entry.WarmupMs is < 0 or > 30000 || entry.PrerollMs is < 0 or > 30000 ||
                 entry.ClassId.Length != 32 || !entry.ClassId.All(char.IsAsciiHexDigit) || entry.StateSha256.Length != 64 ||
                 entry.Roles.Length > 16 || entry.Tags.Length > 16 || entry.Verification is null) throw new JsonException();
             if (checkState) _ = State(entry);
@@ -100,7 +100,7 @@ public sealed class SoundShelf(Workspace workspace, VstCatalog catalog)
             tags = entry.Tags, classification_source = entry.ClassificationSource, catalog_id = entry.CatalogId,
             class_id = entry.ClassId, plugin_version = entry.PluginVersion,
             state = new { reference = entry.SoundId, sha256 = entry.StateSha256, size = entry.StateSize, captured = true },
-            loading = new { warmup_ms = entry.WarmupMs, realtime = entry.Realtime }, created_at = entry.CreatedAt,
+            loading = new { warmup_ms = entry.WarmupMs, realtime = entry.Realtime, preroll_ms = entry.PrerollMs }, created_at = entry.CreatedAt,
             verification = new { initial_audible = entry.Verification.InitialAudible, restored_audible = entry.Verification.RestoredAudible,
                 human_reviewed = entry.Verification.HumanReviewed, evidence = entry.Verification.Evidence, checked_at = entry.Verification.CheckedAt,
                 source = "operator_attestation" }, available = error is null, availability_error = error,
@@ -127,11 +127,12 @@ public sealed class SoundShelf(Workspace workspace, VstCatalog catalog)
     }
     public static JsonElement RegisterInput(JsonElement input)
     {
-        Closed(input, "track_id", "file_id", "display_name", "category", "roles", "tags", "classification_source", "warmup_ms", "realtime");
+        Closed(input, "track_id", "file_id", "display_name", "category", "roles", "tags", "classification_source", "warmup_ms", "realtime", "preroll_ms");
         _ = Text(input, "track_id"); _ = Text(input, "display_name"); _ = Text(input, "category", 64);
         _ = Text(input, "classification_source", 512); _ = Labels(input, "roles"); _ = Labels(input, "tags");
         if (input.TryGetProperty("file_id", out _)) _ = Text(input, "file_id", 32);
         if (input.TryGetProperty("warmup_ms", out var warmup) && warmup.GetInt32() is < 0 or > 30000) throw new ArgumentException();
+        if (input.TryGetProperty("preroll_ms", out var preroll) && preroll.GetInt32() is < 0 or > 30000) throw new ArgumentException();
         if (input.TryGetProperty("realtime", out var realtime)) _ = realtime.GetBoolean();
         return input.Clone();
     }
@@ -146,7 +147,8 @@ public sealed class SoundShelf(Workspace workspace, VstCatalog catalog)
                 Labels(input, "roles"), Labels(input, "tags"), Text(input, "classification_source", 512), instrument.Id, instrument.ClassId,
                 instrument.Version, Convert.ToBase64String(state), Workspace.Digest(state), state.Length,
                 input.TryGetProperty("warmup_ms", out var warmup) ? warmup.GetInt32() : 0,
-                input.TryGetProperty("realtime", out var realtime) && realtime.GetBoolean(), DateTime.UtcNow.ToString("O"), new(false, false, false, "", null));
+                input.TryGetProperty("realtime", out var realtime) && realtime.GetBoolean(), DateTime.UtcNow.ToString("O"), new(false, false, false, "", null),
+                input.TryGetProperty("preroll_ms", out var preroll) ? preroll.GetInt32() : 0);
             Write(entry, false); return JsonSerializer.SerializeToElement(View(entry));
         }
     }
@@ -210,7 +212,7 @@ public sealed class SoundShelf(Workspace workspace, VstCatalog catalog)
         }
     }
     internal static object Instrument(Entry entry) => new { backend = "vst3", catalog_id = entry.CatalogId, state_base64 = entry.StateBase64,
-        sound_id = entry.SoundId, plugin_version = entry.PluginVersion, warmup_ms = entry.WarmupMs, realtime = entry.Realtime };
+        sound_id = entry.SoundId, plugin_version = entry.PluginVersion, warmup_ms = entry.WarmupMs, realtime = entry.Realtime, preroll_ms = entry.PrerollMs };
 
     // Original, fixed test notes. No bundled/vendor phrase collections.
     internal static byte[] PreviewMidi(string phrase)

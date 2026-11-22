@@ -7,7 +7,7 @@ namespace Flamoris.Cantabile.Host;
 public sealed class BandRenderer(Workspace workspace, VstCatalog catalog)
 {
     private readonly string? worker = Environment.GetEnvironmentVariable("CANTABILE_RENDERER");
-    internal sealed record Part(string TrackId, VstCatalog.Entry Instrument, byte[]? State, byte[] Midi, double Volume, double Pan, int? WarmupMs = null, bool? Realtime = null);
+    internal sealed record Part(string TrackId, VstCatalog.Entry Instrument, byte[]? State, byte[] Midi, double Volume, double Pan, int? WarmupMs = null, bool? Realtime = null, int PrerollMs = 0);
     internal Part[] Prepare(JsonElement plan)
     {
         if (!File.Exists(worker)) throw new McpFault("vst_backend_unavailable");
@@ -24,7 +24,8 @@ public sealed class BandRenderer(Workspace workspace, VstCatalog catalog)
             return new Part(track, entry, state, Convert.FromBase64String(p.GetProperty("midi_base64").GetString()!),
                 p.GetProperty("volume").GetDouble(), p.GetProperty("pan").GetDouble(),
                 instrument.TryGetProperty("warmup_ms", out var warmup) ? warmup.GetInt32() : null,
-                instrument.TryGetProperty("realtime", out var realtime) ? realtime.GetBoolean() : null);
+                instrument.TryGetProperty("realtime", out var realtime) ? realtime.GetBoolean() : null,
+                instrument.TryGetProperty("preroll_ms", out var preroll) ? preroll.GetInt32() : 0);
         }).ToArray();
         if (parts.Length is < 1 or > 32) throw new McpFault("render_track_limit");
         return parts;
@@ -55,9 +56,10 @@ public sealed class BandRenderer(Workspace workspace, VstCatalog catalog)
                 int partWarmup = part.WarmupMs ?? warmup;
                 if (part.Realtime ?? realtime) arguments.Add("--realtime");
                 arguments.AddRange(["--warmup-ms", partWarmup.ToString(System.Globalization.CultureInfo.InvariantCulture)]);
+                arguments.AddRange(["--preroll-ms", part.PrerollMs.ToString(System.Globalization.CultureInfo.InvariantCulture)]);
                 try
                 {
-                    var result = await WorkerProcess.Run(worker!, arguments, sandbox, TimeSpan.FromSeconds(maximumSeconds + 30) + TimeSpan.FromMilliseconds(partWarmup), token);
+                    var result = await WorkerProcess.Run(worker!, arguments, sandbox, TimeSpan.FromSeconds(maximumSeconds + 30) + TimeSpan.FromMilliseconds(partWarmup + part.PrerollMs), token);
                     if (result.GetProperty("backend").GetString() != "vst3" || result.GetProperty("sample_format").GetString() != "ieee_float32le") throw new McpFault("invalid_audio");
                     Workspace.DemandRegular(output);
                     long size = new FileInfo(output).Length;

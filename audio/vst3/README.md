@@ -188,6 +188,12 @@ testing the original MIDI. The job wall-clock budget includes the startup wait
 in addition to the render limit and normal safety margin. The wait adds no WAV
 frames or leading silence.
 
+Catalog-backed track states can additionally retain `preroll_ms`. The worker
+option `--preroll-ms 0..30000` processes paced silent blocks with transport
+stopped before musical zero, then discards them. Unlike startup waiting, this
+can initialize samplers which require processing calls. Output duration and
+note positions remain unchanged. See [sound-shelf loading conditions](../../docs/SOUND_SHELF.md).
+
 For a PC connected through Hub, use a separately provisioned Windows upstream
 and its private credential file; retain an existing Linux/SoundFont connection.
 With the same environment settings, launch the host's `serve` command as described

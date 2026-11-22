@@ -4,6 +4,9 @@
 > preserves typed rollback/audit summaries through job status. The legacy calls
 > below remain supported. State changes become native project edits only through
 > `instrument_state_set`.
+> [Sound-shelf loading conditions](SOUND_SHELF.md) also apply a track's
+> optional processing `preroll_ms` to targeted Script renders. The CLI uses
+> `--preroll-ms`; it processes silence before musical zero and adds no WAV frames.
 
 # VST 3 Inspector and Script Controller
 

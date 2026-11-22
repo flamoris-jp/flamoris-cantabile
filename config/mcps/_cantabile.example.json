@@ -1624,6 +1624,11 @@
               },
               "realtime": {
                 "type": "boolean"
+              },
+              "preroll_ms": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 30000
               }
             },
             "required": [
