@@ -81,16 +81,16 @@ public sealed class EditorHost : IMcpHost, IAsyncDisposable
             if (track.GetProperty("id").GetString() == id) return track.Clone();
         throw new McpFault("NOT_FOUND");
     }
-    private (VstCatalog.Entry? Entry, byte[]? State) Target(JsonElement input)
+    private (VstCatalog.Entry? Entry, byte[]? State, int PrerollMs) Target(JsonElement input)
     {
-        if (!input.TryGetProperty("track_id", out _)) return (null, null);
+        if (!input.TryGetProperty("track_id", out _)) return (null, null, 0);
         var track = Track(Text(input, "track_id"));
         if (!track.TryGetProperty("instrument", out var instrument) || !instrument.TryGetProperty("catalog_id", out var id)) throw new McpFault("instrument_unassigned");
         var entry = Catalog.Resolve(id.GetString()!);
         if (instrument.TryGetProperty("plugin_version", out var version) && version.GetString() != entry.Version) throw new McpFault("sound_version_mismatch");
         byte[]? state = BandRenderer.State(instrument);
         if (state is not null) SoundShelf.ValidateState(state, entry.ClassId);
-        return (entry, state);
+        return (entry, state, instrument.TryGetProperty("preroll_ms", out var preroll) ? preroll.GetInt32() : 0);
     }
     private byte[] TargetMidi(JsonElement input)
     {
@@ -228,10 +228,10 @@ public sealed class EditorHost : IMcpHost, IAsyncDisposable
             (ctx, x, token) => ctx.ReadAsync(() => { var target = Target(x); return Identified(Vst.Inspect(token, target.Entry, target.State), x); }), foreground: false);
         yield return new HostTool<JsonElement>("vst_script", "Run a bounded version-1 JSON VST script with inspect, list_parameters and get_parameter only. No file bindings or writes.",
             Schema(new { script = new { type = "object" }, track_id = new { type = "string", maxLength = 128 } }, ["script"]), OperationKind.Query,
-            x => VstController.ScriptInput(x, false), (ctx, x, token) => ctx.ReadAsync(() => { var target = Target(x); return Identified(Vst.Script(x, false, null, engine.Revision, token, target.Entry, target.State), x); }), foreground: false);
+            x => VstController.ScriptInput(x, false), (ctx, x, token) => ctx.ReadAsync(() => { var target = Target(x); return Identified(Vst.Script(x, false, null, engine.Revision, token, target.Entry, target.State, target.PrerollMs), x); }), foreground: false);
         yield return new HostTool<JsonElement>("vst_script_write", "Run allowed VST parameter, MIDI/render and state operations after Inspector validation. Requires edit permission, current guard and host CANTABILE_VST3_SCRIPT_WRITE opt-in. Current project MIDI is input.mid; files binds existing MIDI/state artifact IDs to safe basenames. Outputs publish only on success.",
             Schema(new { script = new { type = "object" }, track_id = new { type = "string", maxLength = 128 }, files = new { type = "object", maxProperties = 16, additionalProperties = new { type = "string", pattern = "^[a-f0-9]{32}$" } } }, ["script"]), OperationKind.Transaction,
-            x => VstController.ScriptInput(x, true), (ctx, x, token) => ctx.CommitAsync(() => { var target = Target(x); return Identified(Vst.Script(x, true, TargetMidi(x), engine.Revision, token, target.Entry, target.State), x); }));
+            x => VstController.ScriptInput(x, true), (ctx, x, token) => ctx.CommitAsync(() => { var target = Target(x); return Identified(Vst.Script(x, true, TargetMidi(x), engine.Revision, token, target.Entry, target.State, target.PrerollMs), x); }));
         yield return new HostTool<JsonElement>("vst_scan", "Start an asynchronous scan of standard VST3 locations and operator-registered CANTABILE_VST3_PATHS. One isolated worker per module/class; failures are retained. Poll vst_job_status.", EmptySchema,
             OperationKind.Mutation, x => Decode(x), (ctx, _, _) => ctx.CommitAsync(() => Jobs.Begin("vst_scan", engine.Revision, Catalog.Scan)));
         yield return new HostTool<JsonElement>("vst_job_status", "Read a host-owned scan, script or multi-instrument job, including bounded rollback/audit failure summaries and immutable completed artifacts.",
@@ -255,7 +255,7 @@ public sealed class EditorHost : IMcpHost, IAsyncDisposable
             x => VstController.ScriptInput(x, true), (ctx, x, _) => ctx.CommitAsync(() => {
                 var target = Target(x); byte[] midi = TargetMidi(x); long revision = engine.Revision;
                 return Jobs.Begin("vst_script", revision, async (progress, token) => {
-                    progress(0, 1); var result = await Vst.ExecuteAsync(x, true, midi, revision, token, target.Entry, target.State);
+                    progress(0, 1); var result = await Vst.ExecuteAsync(x, true, midi, revision, token, target.Entry, target.State, target.PrerollMs);
                     progress(1, 1); return Identified(result, x);
                 });
             }));
@@ -273,7 +273,8 @@ public sealed class EditorHost : IMcpHost, IAsyncDisposable
         yield return new HostTool<JsonElement>("sound_register", "Retain a private independent copy of a track's standard state or state artifact. Returns a stable sound ID; never exposes state bytes or local paths. Registration does not certify audible restoration.",
             Schema(new { track_id = text, file_id = new { type = "string", maxLength = 32 }, display_name = text, category = new { type = "string", minLength = 1, maxLength = 64 },
                 roles = labels, tags = labels, classification_source = new { type = "string", minLength = 1, maxLength = 512 },
-                warmup_ms = new { type = "integer", minimum = 0, maximum = 30000 }, realtime = new { type = "boolean" } }, ["track_id", "display_name", "category", "classification_source"]),
+                warmup_ms = new { type = "integer", minimum = 0, maximum = 30000 }, realtime = new { type = "boolean" },
+                preroll_ms = new { type = "integer", minimum = 0, maximum = 30000 } }, ["track_id", "display_name", "category", "classification_source"]),
             OperationKind.Transaction, x => SoundInput(SoundShelf.RegisterInput, x), (ctx, x, _) => ctx.CommitAsync(() => {
                 var target = Target(x);
                 byte[] state = x.TryGetProperty("file_id", out var file) ? workspace.VstInputArtifact(file.GetString()!, ".vstpreset") : target.State ?? throw new McpFault("sound_state_required");
@@ -297,7 +298,7 @@ public sealed class EditorHost : IMcpHost, IAsyncDisposable
             x => { Decode(x, "sound_id", "phrase"); _ = Text(x, "sound_id"); if (Text(x, "phrase") is not ("melody" or "bass" or "drums")) throw new ArgumentException(); return x; },
             (ctx, x, _) => ctx.CommitAsync(() => {
                 var target = Sounds.Resolve(Text(x, "sound_id")); byte[] midi = SoundShelf.PreviewMidi(Text(x, "phrase")); long revision = engine.Revision;
-                var parts = new[] { new BandRenderer.Part("preview", target.Instrument, target.State, midi, 0.5, 0, target.Sound.WarmupMs, target.Sound.Realtime) };
+                var parts = new[] { new BandRenderer.Part("preview", target.Instrument, target.State, midi, 0.5, 0, target.Sound.WarmupMs, target.Sound.Realtime, target.Sound.PrerollMs) };
                 return Jobs.Begin("sound_preview", revision, async (progress, token) => {
                     var result = await Band.Run(parts, revision, 10, progress, token);
                     return JsonSerializer.SerializeToElement(new { sound_id = target.Sound.SoundId, state_sha256 = target.Sound.StateSha256, render = result });

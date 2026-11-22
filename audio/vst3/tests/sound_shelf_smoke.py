@@ -7,6 +7,7 @@ import os
 from pathlib import Path
 import sys
 import tempfile
+import time
 
 from band_mcp_smoke import wait, test_host
 
@@ -35,7 +36,7 @@ def main():
                 client.download(artifact['file_id'],chunk=131072)
                 sound=client.tool('sound_register', {'track_id':'p0','file_id':artifact['file_id'],
                     'display_name':f'Test piano {value}','category':'keys','roles':['chords'],
-                    'classification_source':'SDK test instrument; original notes'})
+                    'classification_source':'SDK test instrument; original notes','preroll_ms':250 if value==0.1 else 0})
                 assert sound['state']['sha256']==artifact['sha256']
                 assert sound['restoration']=='unverified'
                 sounds.append(sound)
@@ -51,8 +52,16 @@ def main():
                 snapshot=client.tool('project_get', {},guard=False)
                 result=wait(client,client.tool('sound_preview', {'sound_id':sound['sound_id'],'phrase':'melody'}))['result']
                 before.append(client.download(result['render']['artifact']['file_id'],chunk=131072))
+                assert result['render']['audio']['frames']==192000, 'Preroll must not add file frames'
+                import array
+                pcm=array.array('h');pcm.frombytes(before[-1][44:])
+                onset=next(n//2 for n,s in enumerate(pcm) if abs(s)>3)
+                assert onset<4800, ('Preroll shifted first note',onset)
                 assert client.tool('project_get', {},guard=False)==snapshot
             assert before[0]!=before[1], 'Changed settings must change actual audio'
+            scripted=wait(client,client.tool('vst_script_begin', {'track_id':'p0','script':{'version':1,'operations':[
+                {'op':'render','midi':'input.mid','output':'targeted.wav'}]}}))['result']
+            assert scripted['results'][0]['audio']['preroll_ms']==250,scripted
             client.close(); client=test_host.Client(directory)
             assert client.tool('project_get', {},guard=False)['project']==project
             for i,(sound,value) in enumerate(zip(sounds,(0.1,0.9))):
@@ -70,6 +79,14 @@ def main():
             rendered=wait(client,client.tool('audio_render', {'max_seconds':10}))['result']
             assert len(rendered['stems'])==2 and rendered['audio']['clipped_samples']==0
             client.download(rendered['artifact']['file_id'],chunk=131072)
+            slow=client.tool('sound_register', {'track_id':'p0','display_name':'Preroll cancellation fixture','category':'keys',
+                'classification_source':'SDK test fixture','preroll_ms':5000})
+            files=client.tool('file_list', {},guard=False)
+            job=client.tool('sound_preview', {'sound_id':slow['sound_id'],'phrase':'melody'})
+            time.sleep(0.6)  # MDA initialization is short; processing preroll is still running.
+            client.tool('audio_cancel', {'job_id':job['job_id']})
+            wait(client,job,'cancelled')
+            assert client.tool('file_list', {},guard=False)==files
             print('Sound shelf: real changed-state retention, distinct audio, restart, preview isolation and independent project copies passed.')
         finally: client.close()
 

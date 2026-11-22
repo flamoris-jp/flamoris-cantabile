@@ -90,14 +90,14 @@ public sealed partial class VstController(Workspace workspace)
         try { return ExecuteAsync(null, false, null, -1, token, target, state).GetAwaiter().GetResult(); }
         catch (WorkerFailure failure) { throw new McpFault(failure.Code); }
     }
-    public JsonElement Script(JsonElement input, bool write, byte[]? midi, long revision, CancellationToken token, VstCatalog.Entry? target = null, byte[]? state = null)
+    public JsonElement Script(JsonElement input, bool write, byte[]? midi, long revision, CancellationToken token, VstCatalog.Entry? target = null, byte[]? state = null, int prerollMs = 0)
     {
-        try { return ExecuteAsync(input, write, midi, revision, token, target, state).GetAwaiter().GetResult(); }
+        try { return ExecuteAsync(input, write, midi, revision, token, target, state, prerollMs).GetAwaiter().GetResult(); }
         catch (WorkerFailure failure) { throw new McpFault(failure.Code); }
     }
 
     public async Task<JsonElement> ExecuteAsync(JsonElement? input, bool write, byte[]? midi, long revision, CancellationToken token,
-        VstCatalog.Entry? target = null, byte[]? state = null)
+        VstCatalog.Entry? target = null, byte[]? state = null, int prerollMs = 0)
     {
         string tool = input is null ? "vst_inspect" : write ? "vst_script_write" : "vst_script";
         int operations = input?.GetProperty("script").GetProperty("operations").GetArrayLength() ?? 0;
@@ -143,6 +143,7 @@ public sealed partial class VstController(Workspace workspace)
                 if (Environment.GetEnvironmentVariable("CANTABILE_VST3_REALTIME")?.ToLowerInvariant() is "true" or "1") args.Add("--realtime");
                 string? warmup = Environment.GetEnvironmentVariable("CANTABILE_VST3_WARMUP_MS");
                 if (!string.IsNullOrEmpty(warmup)) { args.Add("--warmup-ms"); args.Add(warmup); }
+                args.AddRange(["--preroll-ms", prerollMs.ToString(CultureInfo.InvariantCulture)]);
             }
             var response = await WorkerProcess.Run(renderer!, args, sandbox, TimeSpan.FromMilliseconds(timeout), lifetime.Token, 8 * 1024 * 1024);
             var result = JsonNode.Parse(response.GetRawText())!.AsObject();

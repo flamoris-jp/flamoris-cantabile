@@ -90,6 +90,7 @@ struct Options {
     std::string class_id;
     int max_seconds = 600;
     int warmup_ms = 0;
+    int preroll_ms = 0;
     bool list = false, realtime = false, inspect = false, scripting = false, allow_write = false, floating = false;
 };
 
@@ -129,6 +130,7 @@ Options parse(int argc, Char** argv) {
         else if (flag == "--output" && !options.list && !options.inspect && !options.scripting) options.output = value;
         else if (flag == "--max-seconds" && !options.list) options.max_seconds = bounded_integer(value, flag, 1, 600);
         else if (flag == "--warmup-ms" && !options.list) options.warmup_ms = bounded_integer(value, flag, 0, 30000);
+        else if (flag == "--preroll-ms" && !options.list) options.preroll_ms = bounded_integer(value, flag, 0, 30000);
         else fail("INVALID_ARGUMENT", "Unknown option: " + flag);
     }
     if (options.plugin.empty() || (options.scripting && (options.script.empty() || options.workspace.empty())) ||
@@ -389,6 +391,30 @@ json render(const Options& options, const Score& score, PlugProvider& provider, 
     std::size_t next = 0, timing_index = 0;
     const auto end = score.frames + latency;
     std::array<unsigned char, block_size * 8> pcm{};
+    // Some samplers initialize only while process() is called. Process bounded
+    // silent blocks in real elapsed time, with transport stopped and no MIDI.
+    // Discard every preroll sample; musical frame zero and file length remain
+    // unchanged. Keep continuous sample time monotonic across the boundary.
+    const std::int64_t preroll_frames = static_cast<std::int64_t>(options.preroll_ms) * sample_rate / 1000;
+    if (preroll_frames) {
+        const auto preroll_start = Clock::now();
+        context.state &= ~ProcessContext::kPlaying;
+        context.tempo = 60000000. / score.timings.front().tempo_us;
+        context.timeSigNumerator = score.timings.front().numerator;
+        context.timeSigDenominator = score.timings.front().denominator;
+        events.clear(); parameters.clearQueue();
+        for (std::int64_t position = 0; position < preroll_frames;) {
+            check_deadline();
+            const auto count = static_cast<int32>(std::min<std::int64_t>(block_size, preroll_frames - position));
+            context.projectTimeSamples = 0; context.continousTimeSamples = position; context.projectTimeMusic = 0;
+            process.numSamples = count; left.fill(0); right.fill(0); outputs[0].silenceFlags = 0;
+            check(processor->process(process), "VST preroll processing failed");
+            position += count;
+            const auto elapsed = std::chrono::duration<double>(static_cast<double>(position) / sample_rate);
+            wait_until(preroll_start + std::chrono::duration_cast<Clock::duration>(elapsed));
+        }
+        context.state |= ProcessContext::kPlaying;
+    }
     const auto start = Clock::now();
     for (std::int64_t position = 0; position < end;) {
         check_deadline();
@@ -418,7 +444,8 @@ json render(const Options& options, const Score& score, PlugProvider& provider, 
         }
         while (next < score.messages.size() && score.messages[next].frame < block_end)
             transfer(score.messages[next++], position, score.ppq, events, parameters, mapping);
-        context.projectTimeSamples = context.continousTimeSamples = position;
+        context.projectTimeSamples = position;
+        context.continousTimeSamples = preroll_frames + position;
         context.tempo = 60000000. / timing.tempo_us;
         context.timeSigNumerator = timing.numerator;
         context.timeSigDenominator = timing.denominator;
@@ -449,6 +476,7 @@ json render(const Options& options, const Score& score, PlugProvider& provider, 
     wave.publish();
     return {{"ok", true}, {"backend", "vst3"}, {"sample_rate", sample_rate},
             {"process_mode", options.realtime ? "realtime" : "offline"},
+            {"preroll_ms", options.preroll_ms},
             {"channels", 2}, {"sample_format", options.floating ? "ieee_float32le" : "pcm_s16le"}, {"frames", score.frames},
             {"duration_seconds", static_cast<double>(score.frames) / sample_rate},
             {"peak", peak}, {"clipped_samples", clipped}};
@@ -511,7 +539,7 @@ int main_for(int argc, Char** argv) {
                          "cantabile-client script --plugin PATH.vst3 --script REQUEST.json --workspace DIR [--allow-write]\n"
                          "cantabile-client --plugin PATH.vst3 [--class-id ID] [--preset FILE.vstpreset]\n"
                          "                 --midi PART.mid --output OUT.wav [--max-seconds 600]\n"
-                         "                 [--realtime] [--warmup-ms 0] [--float-output]\n";
+                         "                 [--realtime] [--warmup-ms 0] [--preroll-ms 0] [--float-output]\n";
             return 0;
         }
         std::cout << run(parse(argc, argv)).dump(-1, ' ', false, json::error_handler_t::replace) << '\n';
