@@ -92,7 +92,8 @@ def main():
         (library / "Variant.nksn").write_text("synthetic snapshot")
         config = root / "libraries.json"
         config.write_text(json.dumps({"version": 1, "libraries": [{"id": "original", "name": "Synthetic", "root": str(library)}]}))
-        os.environ.update(CANTABILE_KONTAKT_LIBRARIES=str(config), CANTABILE_KONTAKT_PREPARE="true", CANTABILE_VST3_PATHS=fixture)
+        os.environ.update(CANTABILE_KONTAKT_LIBRARIES=str(config), CANTABILE_KONTAKT_PREPARE="true",
+                          CANTABILE_VST3_PATHS=fixture, CANTABILE_FIXTURE_KONTAKT_KEYS="native")
         client = test_host.Client(root / "workspace")
         try:
             scan = wait(client, client.tool("vst_scan", {}))
@@ -162,6 +163,30 @@ def main():
             client.tool("vst_job_cancel", {"job_id": pending["job_id"]})
             cancelled = wait(client, pending)
             assert cancelled["state"] == "cancelled", cancelled
+            assert client.tool("file_list", {}) == files
+            assert client.tool("project_get", {}) == before
+            # SDK-only, SDK returning false after opening, absent/ambiguous
+            # native children, and an editor that handles neither route.
+            # Every attempt is a fresh subprocess with a bounded deadline.
+            for mode in ("sdk", "sdk-false", "missing", "ambiguous", "none"):
+                attempt = root / ("keys-" + mode)
+                attempt.mkdir()
+                (attempt / "prepare.json").write_text(json.dumps(dict(version=1, nonce="e"*32,
+                    instrument=str(library / "Original '声' [1].nki"), snapshot=None)))
+                direct = subprocess.run([worker, "kontakt-prepare", "--plugin", fixture,
+                    "--class-id", target["class_id"], "--script", str(attempt / "prepare.json"),
+                    "--workspace", str(attempt), "--output", str(attempt / "prepared.vstpreset"),
+                    "--max-seconds", "30", "--allow-write"], cwd=attempt, capture_output=True,
+                    text=True, timeout=35, env=dict(os.environ, CANTABILE_FIXTURE_KONTAKT_KEYS=mode))
+                published = attempt / "prepared.vstpreset"
+                assert "synthetic_duplicate_f11" not in direct.stderr, (mode, direct.stderr)
+                if mode in ("sdk", "sdk-false"):
+                    assert direct.returncode == 0 and published.exists(), (mode, direct.stdout, direct.stderr)
+                    assert "synthetic_native_f11" not in direct.stderr, (mode, direct.stderr)
+                else:
+                    assert direct.returncode != 0 and not published.exists(), (mode, direct.stdout, direct.stderr)
+                    expected = "KONTAKT_LUA_UNAVAILABLE" if mode == "none" else "KONTAKT_EDITOR_UNSUPPORTED"
+                    assert expected in direct.stdout, (mode, direct.stdout, direct.stderr)
             assert client.tool("file_list", {}) == files
             assert client.tool("project_get", {}) == before
         finally:

@@ -10,6 +10,7 @@
 #include "base/source/fstreamer.h"
 #include "pluginterfaces/base/keycodes.h"
 #include <algorithm>
+#include <cstdlib>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
@@ -42,9 +43,20 @@ public:
 class Controller;
 class Editor final : public CPluginView {
     Controller& controller;
+    HWND child{}, extra{};
+    bool opened = false;
+    std::string mode;
+    void run_lua_dialog();
+    static LRESULT CALLBACK native_window(HWND, UINT, WPARAM, LPARAM);
 public:
-    explicit Editor(Controller& c) : controller(c) { rect = {0,0,400,200}; }
+    explicit Editor(Controller& c) : controller(c) {
+        rect = {0,0,400,200};
+        const char* value = std::getenv("CANTABILE_FIXTURE_KONTAKT_KEYS");
+        mode = value ? value : "native";
+    }
     tresult PLUGIN_API isPlatformTypeSupported(FIDString type) override { return std::string(type) == kPlatformTypeHWND ? kResultTrue : kResultFalse; }
+    tresult PLUGIN_API attached(void* parent, FIDString type) override;
+    tresult PLUGIN_API removed() override;
     tresult PLUGIN_API onKeyDown(char16, int16 key, int16) override;
 };
 class Controller final : public EditController {
@@ -71,8 +83,46 @@ std::vector<std::string> literals(const std::string& source) {
     }
     return values;
 }
+tresult Editor::attached(void* parent, FIDString type) {
+    auto result = CPluginView::attached(parent, type);
+    if (result != kResultOk) return result;
+    if (mode == "missing") return kResultOk;
+    WNDCLASSW klass{}; klass.lpfnWndProc = native_window;
+    klass.hInstance = GetModuleHandleW(nullptr); klass.lpszClassName = L"CantabileSyntheticKontaktChild";
+    if (!RegisterClassW(&klass) && GetLastError() != ERROR_CLASS_ALREADY_EXISTS) return kResultFalse;
+    child = CreateWindowExW(0, klass.lpszClassName, L"", WS_CHILD | WS_VISIBLE,
+        0, 0, 400, 200, static_cast<HWND>(parent), nullptr, klass.hInstance, this);
+    if (mode == "ambiguous") extra = CreateWindowExW(0, L"STATIC", L"", WS_CHILD | WS_VISIBLE,
+        0, 0, 10, 10, static_cast<HWND>(parent), nullptr, klass.hInstance, nullptr);
+    return child ? kResultOk : kResultFalse;
+}
+tresult Editor::removed() {
+    if (extra) DestroyWindow(extra);
+    if (child) DestroyWindow(child);
+    child = extra = nullptr;
+    return CPluginView::removed();
+}
+LRESULT CALLBACK Editor::native_window(HWND window, UINT message, WPARAM wparam, LPARAM lparam) {
+    if (message == WM_NCCREATE) {
+        auto* create = reinterpret_cast<CREATESTRUCTW*>(lparam);
+        SetWindowLongPtrW(window, GWLP_USERDATA, reinterpret_cast<LONG_PTR>(create->lpCreateParams));
+    }
+    auto* editor = reinterpret_cast<Editor*>(GetWindowLongPtrW(window, GWLP_USERDATA));
+    if (message == WM_KEYDOWN && wparam == VK_F11 && editor && editor->mode != "none") {
+        std::cerr << "synthetic_native_f11=true\n";
+        editor->run_lua_dialog();
+        return 0;
+    }
+    return DefWindowProcW(window, message, wparam, lparam);
+}
 tresult Editor::onKeyDown(char16, int16 key, int16) {
-    if (key != KEY_F11) return kResultFalse;
+    if (key != KEY_F11 || (mode != "sdk" && mode != "sdk-false")) return kResultFalse;
+    run_lua_dialog();
+    return mode == "sdk" ? kResultTrue : kResultFalse;
+}
+void Editor::run_lua_dialog() {
+    if (opened) { std::cerr << "synthetic_duplicate_f11=true\n"; return; }
+    opened = true;
     wchar_t filename[32768]{};
     OPENFILENAMEW dialog{}; dialog.lStructSize=sizeof(dialog); dialog.hwndOwner=static_cast<HWND>(systemWindow);
     dialog.lpstrFile=filename; dialog.nMaxFile=32768; dialog.lpstrFilter=L"Lua\0*.lua\0\0";
@@ -80,7 +130,7 @@ tresult Editor::onKeyDown(char16, int16 key, int16) {
     if (!GetOpenFileNameW(&dialog)) {
         std::cerr << "synthetic_open_result=false extended_error=" << CommDlgExtendedError() << '\n';
         std::ofstream out(fs::current_path()/"receipt.txt",std::ios::binary); out << "synthetic-dialog-declined";
-        return kResultTrue;
+        return;
     }
     try {
         auto source=read(filename);
@@ -97,7 +147,6 @@ tresult Editor::onKeyDown(char16, int16 key, int16) {
         auto receipt=fs::u8path(values.back());
         std::ofstream out(receipt,std::ios::binary); out << nonce << (success ? ":ok" : ":failed");
     } catch (...) { std::cerr << "synthetic_decode_exception=true\n"; std::ofstream out(fs::current_path()/"receipt.txt",std::ios::binary); out << "synthetic-decode-failed"; }
-    return kResultTrue;
 }
 }
 BEGIN_FACTORY_DEF("Native Instruments", "https://github.com/flamoris-jp/flamoris-cantabile", "")

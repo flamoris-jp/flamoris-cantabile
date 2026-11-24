@@ -69,12 +69,45 @@ LRESULT CALLBACK kontakt_window(HWND window, UINT message, WPARAM wparam, LPARAM
     return DefWindowProcW(window, message, wparam, lparam);
 }
 
+// Some native editors decline IPlugView key callbacks and handle their HWND's
+// normal message queue instead. Target only this worker's existing focused
+// descendant, or its single visible direct plugin child. Never choose a control
+// by title/class, broadcast to descendants, or change desktop focus.
+HWND kontakt_key_target(HWND parent) {
+    auto owned_child = [parent](HWND child) {
+        DWORD process = 0;
+        return child && IsWindow(child) && IsChild(parent, child) &&
+            GetWindowThreadProcessId(child, &process) == GetCurrentThreadId() &&
+            process == GetCurrentProcessId() && GetAncestor(child, GA_ROOTOWNER) == parent &&
+            IsWindowVisible(child) && IsWindowEnabled(child);
+    };
+    HWND focused = GetFocus();
+    if (owned_child(focused)) return focused;
+    HWND target = nullptr;
+    for (HWND child = GetWindow(parent, GW_CHILD); child; child = GetWindow(child, GW_HWNDNEXT)) {
+        if (!owned_child(child)) continue;
+        if (target) return nullptr; // An ambiguous hierarchy is unsupported.
+        target = child;
+    }
+    return target;
+}
+
+bool kontakt_post_f11(HWND parent) {
+    HWND target = kontakt_key_target(parent);
+    if (!target) return false;
+    const LPARAM down = 1 | (static_cast<LPARAM>(MapVirtualKeyW(VK_F11, MAPVK_VK_TO_VSC)) << 16);
+    // Post both messages so any modal dialog in key-down runs on the UI thread
+    // while the bounded dialog helper can submit the generated script.
+    return PostMessageW(target, WM_KEYDOWN, VK_F11, down) &&
+        PostMessageW(target, WM_KEYUP, VK_F11, down | (static_cast<LPARAM>(3) << 30));
+}
+
 // Called on a helper thread while Kontakt runs its modal Open dialog on the UI
 // thread. The dialog must belong to our process/thread AND our editor window.
 // Recognize only standard filename controls; never guess the first edit field.
 struct KontaktDialog {
     HWND parent{}; DWORD thread{}; fs::path script;
-    std::atomic<bool> submitted{false};
+    std::atomic<bool> submitted{false}, seen{false};
     HWND observed{};
     struct Controls {
         HWND filename{}, combo{}, filetype{}, open{}, cancel{};
@@ -98,6 +131,7 @@ struct KontaktDialog {
         if (GetWindowThreadProcessId(dialog, &process) != self.thread || process != GetCurrentProcessId() || !IsWindowVisible(dialog)) return TRUE;
         wchar_t name[64]{}; GetClassNameW(dialog, name, 64);
         if (std::wstring(name) != L"#32770" || GetAncestor(dialog, GA_ROOTOWNER) != self.parent) return TRUE;
+        self.seen = true;
         kontakt_progress(self.script.parent_path(), "dialog_owned");
         // GetDlgItem searches only direct children. Modern Explorer common
         // dialogs nest native filename controls under a host pane. Identify
@@ -193,10 +227,22 @@ json prepare_kontakt(const Options& options, const json& request, PlugProvider& 
             PostMessageW(dialog.observed, WM_COMMAND, MAKEWPARAM(IDCANCEL, BN_CLICKED), reinterpret_cast<LPARAM>(GetDlgItem(dialog.observed, IDCANCEL)));
         dialog_done = true;
     });
-    // VST3 requires hosts to forward keyboard shortcuts through IPlugView.
+    // Prefer the SDK callback. A declined callback does not establish that Lua
+    // is disabled: native editors may handle their own window message queue.
+    kontakt_progress(root, "shortcut_vst_sent");
     const auto key = editor.view->onKeyDown(0, KEY_F11, 0);
     editor.view->onKeyUp(0, KEY_F11, 0);
-    if (key != kResultTrue && !dialog.submitted) fail("KONTAKT_LUA_UNAVAILABLE", "Enable Kontakt Developer features; official Run Lua shortcut was unavailable");
+    if (key != kResultTrue && !dialog.submitted && !fs::exists(receipt)) {
+        wait_until(Clock::now() + std::chrono::milliseconds(250));
+        if (editor.closed) fail("KONTAKT_PREPARE_CANCELLED", "Preparation editor was closed");
+        // Never issue a second shortcut after an SDK-opened dialog or receipt.
+        if (!dialog.seen && !fs::exists(receipt)) {
+            kontakt_progress(root, "shortcut_native_target");
+            if (!kontakt_post_f11(editor.frame->window))
+                fail("KONTAKT_EDITOR_UNSUPPORTED", "No unambiguous worker-owned native key target");
+            kontakt_progress(root, "shortcut_native_posted");
+        }
+    }
     while (!fs::exists(receipt)) {
         if (editor.closed) fail("KONTAKT_PREPARE_CANCELLED", "Preparation editor was closed");
         if (dialog_done && !dialog.submitted) fail("KONTAKT_LUA_UNAVAILABLE", "Official Open dialog filename control was unavailable");
