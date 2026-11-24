@@ -32,10 +32,18 @@ successfully. The host then requests standard VST3 state with
 
 If the SDK callback declines F11 without opening a dialog or producing a receipt,
 the worker posts one native F11 down/up pair to its own editor's existing focused
-child, or its single visible direct plugin child. It does not change foreground
-focus, send global input, guess among multiple children or retry after an observed
+child, or its single visible direct plugin child. It does not force foreground
+activation, send global input, guess among multiple children or retry after an observed
 dialog. Both paths retain the same receipt and standard-state checks. A declined
 SDK callback alone does not establish that Developer features are disabled.
+
+Native Win32 focus is established on that owned child before SDK/native dispatch;
+`IPlugView::onFocus(true)` alone is only a plugin notification. Focus handed to
+the host frame (for example on activation) is forwarded to its plugin child.
+An editor may redirect it to its own nested child, which is revalidated before
+posting F11. This uses only `SetFocus` on the same process/UI queue: no
+`SetForegroundWindow`, `AttachThreadInput`, desktop input or unrelated window.
+An ambiguous, foreign or unavailable native focus target remains unsupported.
 
 The result is one immutable `.vstpreset` artifact (existing 1 MiB bound), selected
 IDs and source revision. It reports `audible_verified:false` and
@@ -95,7 +103,7 @@ inventory belong in this public repository. The sample above is fictitious.
   a standard Open dialog with matching process, UI thread and root owner. It
   requires the documented `CDM_GETFOLDERPATH` query or the complete recognized
   native filename/type/browser/Open/Cancel structure, plus a known filename edit
-  control, before setting text. No desktop keyboard/mouse, focus-stealing API, clipboard,
+  control, before setting text. No desktop keyboard/mouse, forced foreground activation, clipboard,
   existing DAW/standalone or license dialog automation.
 - UTF-8 paths become fixed-width decimal Lua escapes. JSON/shell quoting is never
   substituted for Lua quoting. Completion receipts are per-job and atomic.
@@ -131,7 +139,9 @@ It contains no NI code, instruments, samples or Lua. It tests actual SDK editor
 calls, native Open dialog, generated path decoding, changed standard state,
 guarded application, Undo/Redo/save/reopen, failure and cancellation. The fixture
 also exercises SDK-handled keys, native-only keys, a declined SDK callback after
-successful loading, absent/ambiguous native children and unsupported shortcuts.
+successful loading, real Win32 focus requirements for SDK/native handlers,
+nested-child focus redirection, parent-frame activation focus forwarding,
+absent/ambiguous native children and unsupported shortcuts.
 It is neither installed nor included in the portable package.
 
 An independent Lua 5.4 gate executes the actual generated script against a
@@ -154,4 +164,5 @@ additional tests; a loaded sound is not a composition API.
   `public.sdk/source/vst/vstpresetfile.h` in the CI-pinned SDK.
 - [Windows common-dialog folder query](https://learn.microsoft.com/en-us/windows/win32/dlgbox/cdm-getfolderpath)
 - [Windows key message contract](https://learn.microsoft.com/en-us/windows/win32/inputdev/wm-keydown)
+- [Win32 keyboard focus](https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-setfocus)
 - [Kontakt MCP development workflow](https://developer.native-instruments.com/komplete-ui/docs/FigmaMCPTutorial/)

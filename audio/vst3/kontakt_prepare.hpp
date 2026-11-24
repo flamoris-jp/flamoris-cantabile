@@ -60,40 +60,52 @@ public:
 };
 IMPLEMENT_FUNKNOWN_METHODS(KontaktFrame, IPlugFrame, IPlugFrame::iid)
 
-LRESULT CALLBACK kontakt_window(HWND window, UINT message, WPARAM wparam, LPARAM lparam) {
-    if (message == WM_CLOSE) {
-        auto* closed = reinterpret_cast<bool*>(GetWindowLongPtrW(window, GWLP_USERDATA));
-        if (closed) *closed = true;
-        return 0;
-    }
-    return DefWindowProcW(window, message, wparam, lparam);
-}
-
 // Some native editors decline IPlugView key callbacks and handle their HWND's
 // normal message queue instead. Target only this worker's existing focused
 // descendant, or its single visible direct plugin child. Never choose a control
-// by title/class, broadcast to descendants, or change desktop focus.
+// by title/class, broadcast to descendants, or attach another input queue.
+bool kontakt_owned_child(HWND parent, HWND child) {
+    DWORD process = 0;
+    return child && IsWindow(child) && IsChild(parent, child) &&
+        GetWindowThreadProcessId(child, &process) == GetCurrentThreadId() &&
+        process == GetCurrentProcessId() && GetAncestor(child, GA_ROOTOWNER) == parent &&
+        IsWindowVisible(child) && IsWindowEnabled(child);
+}
 HWND kontakt_key_target(HWND parent) {
-    auto owned_child = [parent](HWND child) {
-        DWORD process = 0;
-        return child && IsWindow(child) && IsChild(parent, child) &&
-            GetWindowThreadProcessId(child, &process) == GetCurrentThreadId() &&
-            process == GetCurrentProcessId() && GetAncestor(child, GA_ROOTOWNER) == parent &&
-            IsWindowVisible(child) && IsWindowEnabled(child);
-    };
     HWND focused = GetFocus();
-    if (owned_child(focused)) return focused;
+    if (kontakt_owned_child(parent, focused)) return focused;
     HWND target = nullptr;
     for (HWND child = GetWindow(parent, GW_CHILD); child; child = GetWindow(child, GW_HWNDNEXT)) {
-        if (!owned_child(child)) continue;
+        if (!kontakt_owned_child(parent, child)) continue;
         if (target) return nullptr; // An ambiguous hierarchy is unsupported.
         target = child;
     }
     return target;
 }
 
-bool kontakt_post_f11(HWND parent) {
+HWND kontakt_focus_child(HWND parent) {
     HWND target = kontakt_key_target(parent);
+    if (!target) return nullptr;
+    // IPlugView::onFocus is a plugin notification, not Win32 keyboard focus.
+    // SetFocus stays on this worker/UI queue; no SetForegroundWindow or
+    // AttachThreadInput. A native editor may redirect focus to its own child.
+    if (GetFocus() != target) SetFocus(target);
+    HWND focused = GetFocus();
+    return kontakt_owned_child(parent, focused) ? focused : nullptr;
+}
+
+LRESULT CALLBACK kontakt_window(HWND window, UINT message, WPARAM wparam, LPARAM lparam) {
+    if (message == WM_CLOSE) {
+        auto* closed = reinterpret_cast<bool*>(GetWindowLongPtrW(window, GWLP_USERDATA));
+        if (closed) *closed = true;
+        return 0;
+    }
+    if (message == WM_SETFOCUS && kontakt_focus_child(window)) return 0;
+    return DefWindowProcW(window, message, wparam, lparam);
+}
+
+bool kontakt_post_f11(HWND parent) {
+    HWND target = kontakt_focus_child(parent);
     if (!target) return false;
     const LPARAM down = 1 | (static_cast<LPARAM>(MapVirtualKeyW(VK_F11, MAPVK_VK_TO_VSC)) << 16);
     // Post both messages so any modal dialog in key-down runs on the UI thread
@@ -215,6 +227,9 @@ json prepare_kontakt(const Options& options, const json& request, PlugProvider& 
     kontakt_progress(root, "editor_open");
     wait_until(Clock::now() + std::chrono::milliseconds(750));
     if (editor.closed) fail("KONTAKT_PREPARE_CANCELLED", "Preparation editor was closed");
+    // Establish the native child focus before SDK dispatch as well. SDK-only
+    // editors can still handle F11 without an available native child target.
+    kontakt_focus_child(editor.frame->window);
     KontaktDialog dialog; dialog.parent = editor.frame->window; dialog.thread = GetCurrentThreadId(); dialog.script = script;
     std::atomic<bool> dialog_done{false};
     std::jthread submit([&](std::stop_token stop) {
@@ -239,7 +254,7 @@ json prepare_kontakt(const Options& options, const json& request, PlugProvider& 
         if (!dialog.seen && !fs::exists(receipt)) {
             kontakt_progress(root, "shortcut_native_target");
             if (!kontakt_post_f11(editor.frame->window))
-                fail("KONTAKT_EDITOR_UNSUPPORTED", "No unambiguous worker-owned native key target");
+                fail("KONTAKT_EDITOR_UNSUPPORTED", "No unambiguous focused worker-owned native key target");
             kontakt_progress(root, "shortcut_native_posted");
         }
     }
