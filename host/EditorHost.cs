@@ -21,6 +21,8 @@ public sealed class EditorHost : IMcpHost, IAsyncDisposable
     private BandRenderer Band { get; }
     private SoundShelf Sounds { get; }
     private VstCapture Capture { get; }
+    private KontaktLibrary KontaktLibraries { get; } = new();
+    private KontaktPreparation KontaktPrepare { get; }
     public McpBoundary Boundary { get; }
     public HostSnapshot Snapshot => new("flamoris.cantabile", "0.1.0", runtimeId, documentToken, engine.Revision);
     public event Action? Invalidating;
@@ -32,6 +34,7 @@ public sealed class EditorHost : IMcpHost, IAsyncDisposable
             Catalog = new VstCatalog(workspace); Band = new BandRenderer(workspace, Catalog);
             Sounds = new SoundShelf(workspace, Catalog);
             Capture = new VstCapture(workspace);
+            KontaktPrepare = new KontaktPreparation(workspace);
             var saved = workspace.ReadProject(workspace.ActiveName);
             if (saved is { } loaded)
             {
@@ -275,6 +278,28 @@ public sealed class EditorHost : IMcpHost, IAsyncDisposable
             }));
         foreach (var tool in SoundTools()) yield return tool;
         foreach (var tool in CaptureTools()) yield return tool;
+        foreach (var tool in KontaktTools()) yield return tool;
+    }
+    private IEnumerable<HostTool> KontaktTools()
+    {
+        var id = new { type = "string", minLength = 1, maxLength = 128 };
+        yield return new HostTool<JsonElement>("kontakt_library_list", "List metadata for operator-registered Kontakt content roots, then bounded .nki/.nksn file names and opaque IDs in one selected library. Never returns absolute paths, patch bytes or sample data. Discovery is not license or loading verification.",
+            Schema(new { library_id = id, offset = new { type = "integer", minimum = 0, maximum = 2048 }, limit = new { type = "integer", minimum = 1, maximum = 64 } }), OperationKind.Query,
+            x => { Decode(x, "library_id", "offset", "limit"); if (x.TryGetProperty("library_id", out _)) _ = Text(x, "library_id");
+                foreach (var (key, lo, hi) in new[] { ("offset", 0, 2048), ("limit", 1, 64) })
+                    if (x.TryGetProperty(key, out var n) && (!n.TryGetInt32(out int value) || value < lo || value > hi)) throw new ArgumentException(); return x; },
+            (ctx, x, _) => ctx.ReadAsync(() => KontaktLibraries.List(x.TryGetProperty("library_id", out var lib) ? lib.GetString() : null,
+                x.TryGetProperty("offset", out var offset) ? offset.GetInt32() : 0, x.TryGetProperty("limit", out var limit) ? limit.GetInt32() : 32)), foreground: false);
+        yield return new HostTool<JsonElement>("kontakt_prepare_begin", "Prepare one explicitly selected registered .nki and optional compatible .nksn in a fresh visible Windows Kontakt 7/8 VST3 editor via fixed generated official Lua. Requires local PREPARE opt-in and Kontakt Developer features. Does not operate existing apps or accept scripts/paths. Poll vst_job_status; apply the resulting standard state explicitly before render/shelf registration.",
+            Schema(new { catalog_id = id, library_id = id, instrument_id = id, snapshot_id = id }, ["catalog_id", "library_id", "instrument_id"]), OperationKind.Transaction,
+            x => { Decode(x, "catalog_id", "library_id", "instrument_id", "snapshot_id"); foreach (string key in new[] { "catalog_id", "library_id", "instrument_id" }) _ = Text(x, key);
+                if (x.TryGetProperty("snapshot_id", out _)) _ = Text(x, "snapshot_id"); return x; },
+            (ctx, x, _) => ctx.CommitAsync(() => {
+                KontaktPrepare.DemandEnabled(); var target = Catalog.Resolve(Text(x, "catalog_id")); KontaktPreparation.DemandKontakt(target);
+                var selection = KontaktLibraries.Select(Text(x, "library_id"), Text(x, "instrument_id"), x.TryGetProperty("snapshot_id", out var snap) ? snap.GetString() : null);
+                long revision = engine.Revision;
+                return Jobs.Begin("kontakt_prepare", revision, (progress, token) => KontaktPrepare.Run(selection, target, revision, progress, token));
+            }));
     }
     private IEnumerable<HostTool> CaptureTools()
     {

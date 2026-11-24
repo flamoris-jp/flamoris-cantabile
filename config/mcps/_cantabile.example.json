@@ -2404,6 +2404,147 @@
         "destructiveHint": false,
         "openWorldHint": false
       }
+    },
+    {
+      "name": "kontakt_library_list",
+      "description": "List metadata for operator-registered Kontakt content roots, then bounded .nki/.nksn file names and opaque IDs in one selected library. Never returns absolute paths, patch bytes or sample data. Discovery is not license or loading verification.",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "input": {
+            "type": "object",
+            "properties": {
+              "library_id": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 128
+              },
+              "offset": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 2048
+              },
+              "limit": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 64
+              }
+            },
+            "required": [],
+            "additionalProperties": false
+          },
+          "guard": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "runtimeId": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 128
+              },
+              "documentToken": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 128
+              },
+              "expectedRevision": {
+                "type": "string",
+                "pattern": "^(0|[1-9][0-9]*)$",
+                "maxLength": 19
+              }
+            },
+            "required": [
+              "runtimeId",
+              "documentToken"
+            ]
+          }
+        },
+        "additionalProperties": false,
+        "required": [
+          "input"
+        ]
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "kontakt_prepare_begin",
+      "description": "Prepare one explicitly selected registered .nki and optional compatible .nksn in a fresh visible Windows Kontakt 7/8 VST3 editor via fixed generated official Lua. Requires local PREPARE opt-in and Kontakt Developer features. Does not operate existing apps or accept scripts/paths. Poll vst_job_status; apply the resulting standard state explicitly before render/shelf registration.",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "input": {
+            "type": "object",
+            "properties": {
+              "catalog_id": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 128
+              },
+              "library_id": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 128
+              },
+              "instrument_id": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 128
+              },
+              "snapshot_id": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 128
+              }
+            },
+            "required": [
+              "catalog_id",
+              "library_id",
+              "instrument_id"
+            ],
+            "additionalProperties": false
+          },
+          "guard": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "runtimeId": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 128
+              },
+              "documentToken": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 128
+              },
+              "expectedRevision": {
+                "type": "string",
+                "pattern": "^(0|[1-9][0-9]*)$",
+                "maxLength": 19
+              }
+            },
+            "required": [
+              "runtimeId",
+              "documentToken",
+              "expectedRevision"
+            ]
+          }
+        },
+        "additionalProperties": false,
+        "required": [
+          "input",
+          "guard"
+        ]
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "openWorldHint": false
+      }
     }
   ]
 }

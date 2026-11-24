@@ -31,6 +31,13 @@ Windows users can use the [GitHub CLI update launcher](audio/vst3/CantabileClien
 to fetch the latest successful main Windows build without manually downloading
 ZIPs. See [authentication, update selection and fallback behavior](audio/vst3/README.md#updating-on-windows-without-manually-downloading-zips).
 
+An [experimental Windows Kontakt preparation adapter](docs/KONTAKT_PREPARATION.md)
+adds registered `.nki`/`.nksn` metadata discovery and preparation in a fresh
+visible VST3 editor through fixed official Lua loading calls. Applying the
+resulting state uses existing native/shelf operations. Actual Kontakt/PLAYBOX
+execution and listening remain workstation acceptance gates; a synthetic editor
+test is not commercial-instrument support.
+
 The development host can also select paced VST rendering and startup wait through
 `CANTABILE_VST3_REALTIME` / `CANTABILE_VST3_WARMUP_MS`. An EZkeys 2 workstation
 CLI test was accepted with the original Cubase MIDI, a saved Follow Host OFF

@@ -1,5 +1,10 @@
 # Cantabile headless MCP host (0.1)
 
+The optional [Kontakt preparation adapter](../docs/KONTAKT_PREPARATION.md) adds
+two development tools (41 total). Metadata discovery is headless; preparation
+requires explicit local opt-in and a fresh visible Windows plugin editor. It
+does not operate existing applications or accept caller scripts/paths.
+
 This .NET 10 adapter attaches to one authoritative native C++ session through the
 C ABI. It does not maintain another project model or Undo/Redo stack.
 
@@ -204,7 +209,7 @@ locally built test dependencies. No live infrastructure is needed.
 
 ## Catalog-backed VST3 project tools (development)
 
-The development catalog now has 39 tools including `mcp.context`. The published
+The development catalog now has 41 tools including `mcp.context`. The published
 preview/deployed older catalogs retain their separately recorded counts. Regenerate
 and refresh the upstream tool catalog when updating a development host.
 

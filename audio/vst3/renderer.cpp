@@ -27,6 +27,9 @@
 #include <iostream>
 #include <optional>
 #include <thread>
+#include <atomic>
+#include "pluginterfaces/gui/iplugview.h"
+#include "pluginterfaces/base/keycodes.h"
 
 #ifdef _WIN32
 #ifndef NOMINMAX
@@ -34,6 +37,7 @@
 #endif
 #include <objbase.h>
 #include <windows.h>
+#include <commdlg.h>
 #endif
 
 namespace {
@@ -92,6 +96,7 @@ struct Options {
     int warmup_ms = 0;
     int preroll_ms = 0;
     bool capture = false;
+    bool kontakt_prepare = false;
     int start_tick = 0, end_tick = -1, max_events = 8192;
     bool list = false, realtime = false, inspect = false, scripting = false, allow_write = false, floating = false;
 };
@@ -114,10 +119,13 @@ Options parse(int argc, Char** argv) {
     options.inspect = argc > 1 && fs::path(argv[1]) == "inspect";
     options.scripting = argc > 1 && fs::path(argv[1]) == "script";
     options.capture = argc > 1 && fs::path(argv[1]) == "capture";
-    for (int i = (options.list || options.inspect || options.scripting || options.capture) ? 2 : 1; i < argc; ++i) {
+    options.kontakt_prepare = argc > 1 && fs::path(argv[1]) == "kontakt-prepare";
+    for (int i = (options.list || options.inspect || options.scripting || options.capture || options.kontakt_prepare) ? 2 : 1; i < argc; ++i) {
         const auto flag = utf8(argv[i]);
+        if (options.kontakt_prepare && flag != "--plugin" && flag != "--class-id" && flag != "--script" && flag != "--workspace" &&
+            flag != "--output" && flag != "--max-seconds" && flag != "--allow-write") fail("INVALID_ARGUMENT", "Unknown preparation option");
         if (flag == "--float-output" && !options.list && !options.inspect && !options.scripting) { options.floating = true; continue; }
-        if (flag == "--allow-write" && options.scripting) { options.allow_write = true; continue; }
+        if (flag == "--allow-write" && (options.scripting || options.kontakt_prepare)) { options.allow_write = true; continue; }
         if (flag == "--realtime" && !options.list) {
             options.realtime = true;
             continue;
@@ -127,8 +135,8 @@ Options parse(int argc, Char** argv) {
         if (flag == "--plugin") options.plugin = value;
         else if (flag == "--class-id" && !options.list) options.class_id = utf8(value);
         else if (flag == "--preset" && !options.list) options.preset = value;
-        else if (flag == "--script" && options.scripting) options.script = value;
-        else if (flag == "--workspace" && options.scripting) options.workspace = value;
+        else if (flag == "--script" && (options.scripting || options.kontakt_prepare)) options.script = value;
+        else if (flag == "--workspace" && (options.scripting || options.kontakt_prepare)) options.workspace = value;
         else if (flag == "--midi" && !options.list && !options.inspect && !options.scripting) options.midi = value;
         else if (flag == "--output" && !options.list && !options.inspect && !options.scripting) options.output = value;
         else if (flag == "--max-seconds" && !options.list) options.max_seconds = bounded_integer(value, flag, 1, 600);
@@ -140,8 +148,10 @@ Options parse(int argc, Char** argv) {
         else fail("INVALID_ARGUMENT", "Unknown option: " + flag);
     }
     if (options.plugin.empty() || (options.scripting && (options.script.empty() || options.workspace.empty())) ||
-        (!options.list && !options.inspect && !options.scripting && (options.midi.empty() || options.output.empty())))
+        (!options.list && !options.inspect && !options.scripting && !options.kontakt_prepare && (options.midi.empty() || options.output.empty())))
         fail("INVALID_ARGUMENT", "--plugin is required, and rendering also requires --midi and --output");
+    if (options.kontakt_prepare && (!options.allow_write || options.script.empty() || options.workspace.empty() || options.output.empty() || options.max_seconds > 120))
+        fail("INVALID_ARGUMENT", "Preparation needs explicit write opt-in, request, workspace, output and 1..120 seconds");
     return options;
 }
 
@@ -543,10 +553,13 @@ json render(const Options& options, const Score& score, PlugProvider& provider, 
 }
 
 #include "inspector_script.hpp"
+#include "kontakt_lua.hpp"
+#include "kontakt_prepare.hpp"
 
 json run(const Options& options) {
     std::optional<json> request;
     if (options.scripting) request = validate_script(options);
+    if (options.kontakt_prepare) request = validate_kontakt_request(options);
 #ifdef _WIN32
     struct Com {
         HRESULT result = CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
@@ -580,6 +593,7 @@ json run(const Options& options) {
         fail("VST_UNSUPPORTED", "Module contains several instruments; use list and pass --class-id");
     PluginContextFactory::instance().setPluginContext(application);
     PlugProvider provider(factory, *selected);
+    if (options.kontakt_prepare) return prepare_kontakt(options, *request, provider);
     if (options.inspect || options.scripting) {
         initialize_for_control(options, provider);
         auto report = inspect_plugin(options, provider);
@@ -604,6 +618,8 @@ int main_for(int argc, Char** argv) {
                          "cantabile-client inspect --plugin PATH.vst3 [--class-id ID] [--preset FILE.vstpreset]\n"
                          "cantabile-client script --plugin PATH.vst3 --script REQUEST.json --workspace DIR [--allow-write]\n"
                          "cantabile-client capture --plugin PATH.vst3 --midi PART.mid --output GENERATED.mid\n"
+                         "cantabile-client kontakt-prepare --plugin Kontakt.vst3 --class-id ID --script REQUEST.json\n"
+                         "                 --workspace DIR --output DIR/prepared.vstpreset --max-seconds 120 --allow-write\n"
                          "                 [--start-tick 0] [--end-tick N] [--max-events 8192]\n"
                          "cantabile-client --plugin PATH.vst3 [--class-id ID] [--preset FILE.vstpreset]\n"
                          "                 --midi PART.mid --output OUT.wav [--max-seconds 600]\n"

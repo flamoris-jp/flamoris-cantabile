@@ -22,6 +22,7 @@ public static class Program
                 Legacy single VST: CANTABILE_VST3_MODULE is required only for legacy configured selection; CANTABILE_VST3_PRESET and CANTABILE_VST3_CLASS_ID are optional.
                 VST rendering: CANTABILE_VST3_REALTIME (true|false|1|0), CANTABILE_VST3_WARMUP_MS (0..30000). CANTABILE_VST3_SCAN_TIMEOUT_MS (1..30000, default 30000) bounds each scan worker.
                 VST scripts: CANTABILE_VST3_SCRIPT_WRITE (true|false|1|0, default false) enables the edit-only write tool; Inspector and read scripts remain available without it.
+                Kontakt preparation: CANTABILE_KONTAKT_LIBRARIES is a local JSON root allowlist; CANTABILE_KONTAKT_PREPARE=true opts in to fresh visible Windows plugin editors and fixed official Lua loading. No caller scripts or absolute paths over MCP.
                 Changes stay in memory until project_save; saved projects and completed exports survive compatible restarts.
                 """); return 0;
         }

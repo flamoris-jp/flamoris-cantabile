@@ -30,9 +30,25 @@ jobs:
           $headers = python -c "import nlohmann_json; print(nlohmann_json.get_include())"
           cmake -S . -B build-vst -G "Visual Studio 17 2022" -A x64 "-DJSON_INCLUDE_DIR=$headers" "-DCANTABILE_VST3_SDK=$env:RUNNER_TEMP/vst3sdk" -DCANTABILE_VST3_TEST_PLUGIN=ON
           if ($LASTEXITCODE) { exit $LASTEXITCODE }
-          cmake --build build-vst --config Release --parallel 2 --target cantabile-client cantabile-cli cantabile-render cantabile-vst3-test-plugin
+          cmake --build build-vst --config Release --parallel 2 --target cantabile-client cantabile-cli cantabile-render cantabile-kontakt-editor-fixture
       - name: Build existing MCP host
         run: dotnet build host/Flamoris.Cantabile.Host.csproj -c Release
+      - name: Synthetic Kontakt editor preparation and state handoff
+        # Original SDK/Win32 fixture only. This is not vendor Lua acceptance.
+        shell: pwsh
+        run: |
+          & ./audio/vst3/tests/kontakt_setup_smoke.ps1
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          $worker = (Resolve-Path build-vst/audio/vst3/Release/cantabile-client.exe).Path
+          $core = (Resolve-Path build-vst/Release/cantabile_core.dll).Path
+          $fixture = (Resolve-Path build-vst/VST3/Release/cantabile-kontakt-editor-fixture.vst3).Path
+          python audio/vst3/tests/kontakt_prepare_smoke.py $worker $fixture $core
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+      - name: Build remaining SDK regression fixtures
+        shell: pwsh
+        run: |
+          cmake --build build-vst --config Release --parallel 2 --target cantabile-vst3-test-plugin
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
       - name: Phase 1 gate — read-only VST3 Inspector
         shell: pwsh
         run: |
@@ -112,6 +128,8 @@ jobs:
           Copy-Item docs/VST3_PROJECTS.md client-package/docs/VST3_PROJECTS.md
           Copy-Item docs/SOUND_SHELF.md client-package/docs/SOUND_SHELF.md
           Copy-Item docs/VST3_PERFORMANCE.md client-package/docs/VST3_PERFORMANCE.md
+          Copy-Item docs/KONTAKT_PREPARATION.md client-package/docs/KONTAKT_PREPARATION.md
+          Copy-Item audio/vst3/Register-KontaktLibrary.ps1 client-package/Register-KontaktLibrary.ps1
           Copy-Item "$env:RUNNER_TEMP/vst3sdk/LICENSE.txt" client-package/VST3-SDK-LICENSE.txt
           Copy-Item "$env:RUNNER_TEMP/vst3sdk/base/LICENSE.txt" client-package/VST3-base-LICENSE.txt
           Copy-Item "$env:RUNNER_TEMP/vst3sdk/public.sdk/LICENSE.txt" client-package/VST3-public-sdk-LICENSE.txt
