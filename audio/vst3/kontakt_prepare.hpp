@@ -208,7 +208,9 @@ json prepare_kontakt(const Options& options, const json& request, PlugProvider& 
     kontakt_regular(receipt);
     auto receipt_bytes = read_file(receipt, 64, "KONTAKT_LOAD_FAILED");
     const auto expected = request["nonce"].get<std::string>() + ":ok";
-    if (std::string(receipt_bytes.begin(), receipt_bytes.end()) != expected) fail("KONTAKT_LOAD_FAILED", "Official Lua load did not succeed");
+    const std::string received(receipt_bytes.begin(), receipt_bytes.end());
+    if (received == request["nonce"].get<std::string>() + ":failed") fail("KONTAKT_LOAD_FAILED", "Official Lua load did not succeed");
+    if (received != expected) fail("KONTAKT_RECEIPT_INVALID", "Loading did not produce a valid per-job receipt");
     wait_until(Clock::now() + std::chrono::milliseconds(750));
     auto state = snapshot_state(provider);
     kontakt_progress(root, "state_captured");

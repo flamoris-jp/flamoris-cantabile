@@ -12,7 +12,7 @@
 #include <algorithm>
 #include <filesystem>
 #include <fstream>
-#include <regex>
+#include <iostream>
 #include <string>
 #include <vector>
 #define NOMINMAX
@@ -54,14 +54,22 @@ public:
     void loaded() { auto message = owned(allocateMessage()); message->setMessageID("synthetic-loaded"); sendMessage(message); }
 };
 std::string read(const fs::path& path) { std::ifstream f(path, std::ios::binary); return {std::istreambuf_iterator<char>(f),{}}; }
-// Decode only generated decimal-byte Lua string literals, never execute code.
-std::string decode(const std::string& literal) {
-    std::string result;
-    for (size_t i=1; i+4<literal.size(); i+=4) {
-        if (literal[i] != '\\') throw 1;
-        result += static_cast<char>(std::stoi(literal.substr(i+1,3)));
+// Decode only fixed-width generated decimal strings. Avoid recursive regex
+// implementations whose stack limits depend on a Windows temp path's length.
+std::vector<std::string> literals(const std::string& source) {
+    std::vector<std::string> values;
+    for (size_t pos=0; pos<source.size(); ++pos) {
+        if (source[pos] != '"') continue;
+        std::string value; size_t i=pos+1;
+        while (i+3<source.size() && source[i]=='\\' && source[i+1]>='0' && source[i+1]<='9' &&
+               source[i+2]>='0' && source[i+2]<='9' && source[i+3]>='0' && source[i+3]<='9') {
+            int byte=(source[i+1]-'0')*100+(source[i+2]-'0')*10+(source[i+3]-'0');
+            if (byte>255) throw 1;
+            value+=static_cast<char>(byte); i+=4;
+        }
+        if (!value.empty() && i<source.size() && source[i]=='"') { values.push_back(value); pos=i; }
     }
-    return result;
+    return values;
 }
 tresult Editor::onKeyDown(char16, int16 key, int16) {
     if (key != KEY_F11) return kResultFalse;
@@ -69,21 +77,26 @@ tresult Editor::onKeyDown(char16, int16 key, int16) {
     OPENFILENAMEW dialog{}; dialog.lStructSize=sizeof(dialog); dialog.hwndOwner=static_cast<HWND>(systemWindow);
     dialog.lpstrFile=filename; dialog.nMaxFile=32768; dialog.lpstrFilter=L"Lua\0*.lua\0\0";
     dialog.Flags=OFN_FILEMUSTEXIST | OFN_EXPLORER | OFN_NOCHANGEDIR;
-    if (!GetOpenFileNameW(&dialog)) return kResultTrue;
+    if (!GetOpenFileNameW(&dialog)) {
+        std::cerr << "synthetic_open_result=false extended_error=" << CommDlgExtendedError() << '\n';
+        std::ofstream out(fs::current_path()/"receipt.txt",std::ios::binary); out << "synthetic-dialog-declined";
+        return kResultTrue;
+    }
     try {
         auto source=read(filename);
-        std::regex strings("\"(?:\\\\[0-9]{3})+\"");
-        std::vector<std::string> values;
-        for (auto i=std::sregex_iterator(source.begin(),source.end(),strings);i!=std::sregex_iterator();++i) values.push_back(decode(i->str()));
+        std::cerr << "synthetic_open_result=true script_bytes=" << source.size() << '\n';
+        auto values=literals(source);
+        std::cerr << "synthetic_literal_count=" << values.size() << '\n';
         // instrument, optional snapshot, receipt.part, nonce, rename source, destination.
-        if (values.size() < 5) return kResultTrue;
+        if (values.size() < 5) throw 1;
         auto instrument=read(fs::u8path(values[0]));
         bool success=instrument == "original synthetic ready";
+        std::cerr << "synthetic_instrument_ready=" << success << '\n';
         if (success) controller.loaded();
         auto nonce=values[values.size()-3];
         auto receipt=fs::u8path(values.back());
         std::ofstream out(receipt,std::ios::binary); out << nonce << (success ? ":ok" : ":failed");
-    } catch (...) { }
+    } catch (...) { std::cerr << "synthetic_decode_exception=true\n"; std::ofstream out(fs::current_path()/"receipt.txt",std::ios::binary); out << "synthetic-decode-failed"; }
     return kResultTrue;
 }
 }

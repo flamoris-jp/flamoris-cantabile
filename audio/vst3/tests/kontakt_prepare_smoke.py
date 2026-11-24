@@ -6,6 +6,7 @@ import json
 import os
 from pathlib import Path
 import struct
+import subprocess
 import sys
 import tempfile
 import time
@@ -106,6 +107,20 @@ def main():
             before = client.tool("project_get", {})
             request = dict(catalog_id=target["catalog_id"], library_id="original", instrument_id=original["content_id"], snapshot_id=snapshot["content_id"])
             job = wait(client, client.tool("kontakt_prepare_begin", request))
+            if job["state"] != "completed":
+                # Reproduce only this synthetic CLI failure with bounded direct
+                # supervision, so fixture diagnostics do not enter production MCP.
+                debug = root / "direct-debug"
+                debug.mkdir()
+                (debug / "prepare.json").write_text(json.dumps(dict(version=1, nonce="d"*32,
+                    instrument=str(library / "Original '声' [1].nki"), snapshot=str(library / "Variant.nksn"))))
+                try:
+                    direct = subprocess.run([worker, "kontakt-prepare", "--plugin", fixture, "--class-id", target["class_id"],
+                        "--script", str(debug / "prepare.json"), "--workspace", str(debug), "--output", str(debug / "prepared.vstpreset"),
+                        "--max-seconds", "20", "--allow-write"], cwd=debug, capture_output=True, text=True, timeout=25)
+                    print("SYNTHETIC CLI DIAGNOSTIC:", direct.stdout, direct.stderr, flush=True)
+                except subprocess.TimeoutExpired:
+                    print("SYNTHETIC CLI DIAGNOSTIC: bounded timeout", flush=True)
             assert job["state"] == "completed", job
             result = job["result"]
             assert result["state_captured"] and not result["audible_verified"] and not result["project_changed"]
