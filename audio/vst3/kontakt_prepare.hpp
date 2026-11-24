@@ -76,6 +76,22 @@ struct KontaktDialog {
     HWND parent{}; DWORD thread{}; fs::path script;
     std::atomic<bool> submitted{false};
     HWND observed{};
+    struct Controls {
+        HWND filename{}, combo{}, filetype{}, open{}, cancel{};
+        bool browser = false;
+        static BOOL CALLBACK collect(HWND child, LPARAM data) {
+            auto& c = *reinterpret_cast<Controls*>(data);
+            wchar_t text[64]{}; GetClassNameW(child, text, 64); const std::wstring name(text);
+            int id = GetDlgCtrlID(child);
+            if (id == 1152 && name == L"Edit") c.filename = child;
+            if (id == 1148 && (name == L"ComboBox" || name == L"ComboBoxEx32")) c.combo = child;
+            if (id == 1136 && (name == L"ComboBox" || name == L"ComboBoxEx32")) c.filetype = child;
+            if (name == L"Button" && id == IDOK) c.open = child;
+            if (name == L"Button" && id == IDCANCEL) c.cancel = child;
+            if (name == L"DUIViewWndClassName" || name == L"SHELLDLL_DefView" || name == L"DirectUIHWND") c.browser = true;
+            return TRUE;
+        }
+    };
     static BOOL CALLBACK find(HWND dialog, LPARAM data) {
         auto& self = *reinterpret_cast<KontaktDialog*>(data);
         DWORD process = 0;
@@ -83,15 +99,26 @@ struct KontaktDialog {
         wchar_t name[64]{}; GetClassNameW(dialog, name, 64);
         if (std::wstring(name) != L"#32770" || GetAncestor(dialog, GA_ROOTOWNER) != self.parent) return TRUE;
         kontakt_progress(self.script.parent_path(), "dialog_owned");
-        // A generic #32770 license/error window is not an Open dialog. Demand
-        // the documented common-dialog folder query before setting any text.
+        // GetDlgItem searches only direct children. Modern Explorer common
+        // dialogs nest native filename controls under a host pane. Identify
+        // the fixed standard IDs/classes recursively, never by visible text.
+        Controls controls; EnumChildWindows(dialog, Controls::collect, reinterpret_cast<LPARAM>(&controls));
         wchar_t folder[32768]{}; DWORD_PTR folder_size = 0;
-        if (!SendMessageTimeoutW(dialog, CDM_GETFOLDERPATH, 32768, reinterpret_cast<LPARAM>(folder), SMTO_ABORTIFHUNG | SMTO_BLOCK, 500, &folder_size) ||
-            folder_size < 2 || folder_size > 32768) return TRUE;
+        bool common_query = SendMessageTimeoutW(dialog, CDM_GETFOLDERPATH, 32768, reinterpret_cast<LPARAM>(folder), SMTO_ABORTIFHUNG | SMTO_BLOCK, 500, &folder_size) &&
+            folder_size >= 2 && folder_size <= 32768;
+        // A generic license/error dialog is not an Open dialog. If the legacy
+        // query is unavailable, require the complete standard filename/type/
+        // browser/Open/Cancel structure before writing anything.
+        bool common_structure = controls.combo && controls.filetype && controls.browser && controls.open && controls.cancel;
+        if (!common_query && !common_structure) {
+            kontakt_progress(self.script.parent_path(), !controls.combo && !controls.filename ? "dialog_filename_missing" :
+                !controls.filetype ? "dialog_type_missing" : !controls.browser ? "dialog_browser_missing" : "dialog_buttons_missing");
+            return TRUE;
+        }
         self.observed = dialog;
         kontakt_progress(self.script.parent_path(), "dialog_common");
-        HWND filename = GetDlgItem(dialog, 1152); // edt1 (classic common dialog)
-        HWND combo = GetDlgItem(dialog, 1148); // cmb13 (Explorer-style dialog)
+        HWND filename = controls.filename;
+        HWND combo = controls.combo;
         if (combo) {
             HWND edit = FindWindowExW(combo, nullptr, L"Edit", nullptr);
             if (!edit) {
@@ -100,7 +127,7 @@ struct KontaktDialog {
             }
             if (edit) filename = edit;
         }
-        if (!filename || !GetDlgItem(dialog, IDOK)) return TRUE;
+        if (!filename || !controls.open) return TRUE;
         GetClassNameW(filename, name, 64);
         if (std::wstring(name) != L"Edit") return TRUE;
         kontakt_progress(self.script.parent_path(), "filename_control");
@@ -108,7 +135,7 @@ struct KontaktDialog {
         if (!SendMessageTimeoutW(filename, WM_SETTEXT, 0, reinterpret_cast<LPARAM>(self.script.c_str()), SMTO_ABORTIFHUNG | SMTO_BLOCK, 500, &result) || !result) return TRUE;
         self.submitted = true;
         kontakt_progress(self.script.parent_path(), "file_submitted");
-        PostMessageW(dialog, WM_COMMAND, MAKEWPARAM(IDOK, BN_CLICKED), reinterpret_cast<LPARAM>(GetDlgItem(dialog, IDOK)));
+        PostMessageW(dialog, WM_COMMAND, MAKEWPARAM(IDOK, BN_CLICKED), reinterpret_cast<LPARAM>(controls.open));
         return FALSE;
     }
 };

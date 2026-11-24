@@ -15,12 +15,64 @@ sys.path.insert(0, str(ROOT / "host/tests"))
 import test_host
 
 
+def diagnose_owned_windows():
+    # CI-only structural diagnostics: the synthetic worker's window classes,
+    # numeric control IDs and ownership. Never titles, text, paths or other apps.
+    import ctypes
+    from ctypes import wintypes as w
+    user = ctypes.WinDLL("user32")
+    callback = ctypes.WINFUNCTYPE(w.BOOL, w.HWND, w.LPARAM)
+    user.EnumWindows.argtypes = [callback, w.LPARAM]
+    user.EnumChildWindows.argtypes = [w.HWND, callback, w.LPARAM]
+    user.GetClassNameW.argtypes = [w.HWND, w.LPWSTR, ctypes.c_int]
+    user.GetWindowThreadProcessId.argtypes = [w.HWND, ctypes.POINTER(w.DWORD)]
+    user.GetWindowThreadProcessId.restype = w.DWORD
+    user.GetAncestor.argtypes = [w.HWND, w.UINT]
+    user.GetAncestor.restype = w.HWND
+    user.GetDlgCtrlID.argtypes = [w.HWND]
+    def name(window):
+        buf = ctypes.create_unicode_buffer(128)
+        user.GetClassNameW(window, buf, 128)
+        return buf.value
+    hosts = []
+    @callback
+    def find_host(window, _):
+        if name(window) == "CantabileKontaktPreparation":
+            process = w.DWORD()
+            user.GetWindowThreadProcessId(window, ctypes.byref(process))
+            hosts.append((window, process.value))
+        return True
+    user.EnumWindows(find_host, 0)
+    for host, expected_process in hosts:
+        windows = []
+        @callback
+        def collect(window, _):
+            process = w.DWORD()
+            thread = user.GetWindowThreadProcessId(window, ctypes.byref(process))
+            if process.value != expected_process:
+                return True
+            children = []
+            @callback
+            def child(control, _):
+                children.append(dict(kind=name(control), id=user.GetDlgCtrlID(control)))
+                return len(children) < 100
+            user.EnumChildWindows(window, child, 0)
+            windows.append(dict(kind=name(window), thread=thread, owned=user.GetAncestor(window, 3) == host, children=children))
+            return True
+        user.EnumWindows(collect, 0)
+        print("SYNTHETIC WORKER WINDOW STRUCTURE:", json.dumps(windows), flush=True)
+
+
 def wait(client, job):
     deadline = time.monotonic() + 140
+    diagnostic_at = time.monotonic() + 5
     while time.monotonic() < deadline:
         result = client.tool("vst_job_status", {"job_id": job["job_id"]})
         if result["state"] not in ("queued", "running"):
             return result
+        if time.monotonic() > diagnostic_at:
+            diagnose_owned_windows()
+            diagnostic_at = float("inf")
         time.sleep(.05)
     raise AssertionError("bounded job failed to terminate")
 

@@ -63,6 +63,11 @@ MIDI output and internal generation remain separate capabilities.
    this fixed operation separately from the JSON Script Controller. Select a
    content directory, not a drive root. Setup is once per library root;
    individual sounds can then be selected by ID.
+   The packaged `Register-KontaktLibrary.ps1` helper can create/extend this file
+   with a folder picker (`-Configuration FILE -LibraryId playbox -DisplayName PLAYBOX`).
+   For this explicit library it uses an existing installer `ContentDir` value
+   only as a read-only folder suggestion for confirmation, never as proof of
+   licensing or compatibility. It does not modify registry/installer settings.
 5. Run Cantabile in an interactive Windows user session. A visible temporary
    Kontakt window appears during preparation. Avoid interacting with it while
    loading; closing it declines the operation.
@@ -80,9 +85,10 @@ inventory belong in this public repository. The sample above is fictitious.
 - MCP accepts typed registered IDs only. No caller Lua, shell, remote filesystem
   paths, general GUI actions or inferred automation-slot meanings.
 - One preparation job at a time. It operates only the worker-owned editor and
-  a standard Open dialog with matching process, UI thread and root owner. The
-  documented `CDM_GETFOLDERPATH` query and known filename controls must succeed
-  before setting text. No desktop keyboard/mouse, focus-stealing API, clipboard,
+  a standard Open dialog with matching process, UI thread and root owner. It
+  requires the documented `CDM_GETFOLDERPATH` query or the complete recognized
+  native filename/type/browser/Open/Cancel structure, plus a known filename edit
+  control, before setting text. No desktop keyboard/mouse, focus-stealing API, clipboard,
   existing DAW/standalone or license dialog automation.
 - UTF-8 paths become fixed-width decimal Lua escapes. JSON/shell quoting is never
   substituted for Lua quoting. Completion receipts are per-job and atomic.

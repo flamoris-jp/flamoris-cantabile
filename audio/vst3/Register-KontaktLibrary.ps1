@@ -36,12 +36,29 @@ if ($exists) {
     }
 }
 if (-not $Root) {
+    # Optional read-only installer hint, not a license or library API. Confirm
+    # the directory in the picker; never edit Native Access/registry settings.
+    $suggested = ''
+    if ($LibraryId -eq 'playbox') {
+        foreach ($key in @('Registry::HKEY_LOCAL_MACHINE\SOFTWARE\Native Instruments\Playbox',
+                           'Registry::HKEY_CURRENT_USER\SOFTWARE\Native Instruments\Playbox')) {
+            try {
+                $candidate = [string](Get-ItemProperty -LiteralPath $key -Name ContentDir -ErrorAction Stop).ContentDir
+                if ($candidate -and (Test-Path -LiteralPath $candidate -PathType Container)) {
+                    Assert-NoLinks $candidate
+                    $suggested = [IO.Path]::GetFullPath($candidate)
+                    break
+                }
+            } catch { }
+        }
+    }
     Add-Type -AssemblyName System.Windows.Forms
     $picker = New-Object System.Windows.Forms.FolderBrowserDialog
     try {
         $picker.Description = 'Choose the installed content folder for ' + $DisplayName + '. No samples or presets will be copied.'
         $picker.ShowNewFolderButton = $false
-        if ($picker.ShowDialog() -ne [Windows.Forms.DialogResult]::OK) { throw 'Registration cancelled; existing configuration was not changed.' }
+        if ($suggested) { $picker.SelectedPath = $suggested }
+        if ($picker.ShowDialog() -ne [System.Windows.Forms.DialogResult]::OK) { throw 'Registration cancelled; existing configuration was not changed.' }
         $Root = $picker.SelectedPath
     }
     finally { $picker.Dispose() }
