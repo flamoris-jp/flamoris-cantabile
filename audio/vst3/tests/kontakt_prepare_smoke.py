@@ -68,6 +68,10 @@ def main():
                 name, offset, size = struct.unpack_from("<4sQQ", state, pos)
                 chunks[name] = state[offset:offset+size]
             assert chunks[b"Comp"] == struct.pack("<i", 1), chunks
+            no_snapshot = dict(request)
+            del no_snapshot["snapshot_id"]
+            plain = wait(client, client.tool("kontakt_prepare_begin", no_snapshot))
+            assert plain["state"] == "completed" and plain["result"]["snapshot_id"] is None, plain
             client.tool("edit_batch", {"commands": [{"op": "track.add", "track": {"id": "original", "events": []}}]})
             client.tool("instrument_assign", {"track_id": "original", "catalog_id": target["catalog_id"]})
             base = client.tool("project_get", {})["project"]

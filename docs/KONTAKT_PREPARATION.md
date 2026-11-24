@@ -112,6 +112,11 @@ calls, native Open dialog, generated path decoding, changed standard state,
 guarded application, Undo/Redo/save/reopen, failure and cancellation. The fixture
 is neither installed nor included in the portable package.
 
+An independent Lua 5.4 gate executes the actual generated script against a
+synthetic `Kontakt` table to check Unicode/quote/backslash injection resistance,
+selected arguments, optional snapshots and atomic success/failure receipts. It
+does not establish vendor API compatibility. The runtime is not bundled.
+
 Commercial acceptance must separately record actual version/class, Developer
 setup, licensed instrument/snapshot selection, vendor Lua execution, state size,
 sample loading, original MIDI audio/clip/onset/end checks, fresh-worker recall

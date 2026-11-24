@@ -51,6 +51,19 @@ internal sealed class KontaktPreparation(Workspace workspace)
                 state_captured = true, audible_verified = false, project_changed = false,
                 next_step = "instrument_state_set_then_render_and_sound_register" });
         }
+        catch (OperationCanceledException) { throw; }
+        catch (Exception error)
+        {
+            string stage = "unknown";
+            try {
+                string value = System.Text.Encoding.ASCII.GetString(Workspace.ReadBounded(Path.Combine(sandbox, "prepare.progress"), 64));
+                if (value is "editor_open" or "dialog_owned" or "dialog_common" or "filename_control" or "file_submitted" or "lua_receipt" or "state_captured") stage = value;
+            } catch { }
+            string code = error is WorkerFailure workerFailure ? workerFailure.Code : error is McpFault fault ? fault.Code : "kontakt_prepare_failed";
+            workspace.VstAudit("kontakt_prepare_begin", code, 1);
+            throw new WorkerFailure(code, JsonSerializer.SerializeToElement(new { code, preparation_stage = stage,
+                rollback = new { attempted = false, restored = (bool?)null, status = "not_attempted" } }));
+        }
         finally { File.Delete(pending); Directory.Delete(sandbox, recursive: true); }
     }
 }

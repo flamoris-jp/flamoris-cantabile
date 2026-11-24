@@ -36,6 +36,9 @@ if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/audio/CMakeLists.txt")
 endif()
 
 if(BUILD_TESTING)
+    # Exercises the exact generated fixed Lua without a vendor/plugin dependency.
+    add_executable(cantabile-kontakt-lua-fixture tests/kontakt_lua_fixture.cpp)
+    target_link_libraries(cantabile-kontakt-lua-fixture PRIVATE nlohmann_json::nlohmann_json)
     add_executable(cantabile-midi-tests tests/midi_codec_test.cpp src/midi.cpp)
     target_include_directories(cantabile-midi-tests PRIVATE include)
     target_link_libraries(cantabile-midi-tests PRIVATE nlohmann_json::nlohmann_json)

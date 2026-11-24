@@ -553,6 +553,7 @@ json render(const Options& options, const Score& score, PlugProvider& provider, 
 }
 
 #include "inspector_script.hpp"
+#include "kontakt_lua.hpp"
 #include "kontakt_prepare.hpp"
 
 json run(const Options& options) {

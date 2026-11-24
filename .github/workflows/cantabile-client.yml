@@ -99,6 +99,8 @@ jobs:
         # Original SDK/Win32 fixture only. This is not vendor Lua acceptance.
         shell: pwsh
         run: |
+          & ./audio/vst3/tests/kontakt_setup_smoke.ps1
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
           $worker = (Resolve-Path build-vst/audio/vst3/Release/cantabile-client.exe).Path
           $core = (Resolve-Path build-vst/Release/cantabile_core.dll).Path
           $fixture = (Resolve-Path build-vst/VST3/Release/cantabile-kontakt-editor-fixture.vst3).Path
@@ -122,6 +124,7 @@ jobs:
           Copy-Item docs/SOUND_SHELF.md client-package/docs/SOUND_SHELF.md
           Copy-Item docs/VST3_PERFORMANCE.md client-package/docs/VST3_PERFORMANCE.md
           Copy-Item docs/KONTAKT_PREPARATION.md client-package/docs/KONTAKT_PREPARATION.md
+          Copy-Item audio/vst3/Register-KontaktLibrary.ps1 client-package/Register-KontaktLibrary.ps1
           Copy-Item "$env:RUNNER_TEMP/vst3sdk/LICENSE.txt" client-package/VST3-SDK-LICENSE.txt
           Copy-Item "$env:RUNNER_TEMP/vst3sdk/base/LICENSE.txt" client-package/VST3-base-LICENSE.txt
           Copy-Item "$env:RUNNER_TEMP/vst3sdk/public.sdk/LICENSE.txt" client-package/VST3-public-sdk-LICENSE.txt

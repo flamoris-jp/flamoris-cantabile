@@ -90,6 +90,17 @@ class KontaktLibraryTests(unittest.TestCase):
             {"id": "original", "name": "Synthetic", "root": str(self.root / "missing")}]}))
         self.failure({"library_id": "original"}, "kontakt_library_missing")
 
+    def test_null_duplicate_config_and_catalog_limits_fail_closed(self):
+        for libraries in ([{"id": None, "name": "Synthetic", "root": str(self.library)}],
+                          [{"id": "x", "name": "Synthetic", "root": str(self.library)}] * 2):
+            self.config.write_text(json.dumps({"version": 1, "libraries": libraries}))
+            self.failure({}, "kontakt_configuration_invalid")
+        self.config.write_text(json.dumps({"version": 1, "libraries": [
+            {"id": "original", "name": "Synthetic", "root": str(self.library)}]}))
+        for i in range(2048):
+            (self.library / (str(i) + ".nki")).write_bytes(b"synthetic")
+        self.failure({"library_id": "original"}, "kontakt_catalog_limit")
+
 
 if __name__ == "__main__":
     unittest.main()
