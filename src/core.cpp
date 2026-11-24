@@ -1,6 +1,7 @@
 #include <cantabile/core.h>
 #include <cantabile/encoding.hpp>
 #include <cantabile/midi.hpp>
+#include <cantabile/performance.hpp>
 #include <nlohmann/json.hpp>
 #include <algorithm>
 #include <cstring>
@@ -54,6 +55,30 @@ bool valid_id(const std::string& id) {
             (c >= '0' && c <= '9') || c == '-' || c == '_' || c == '.' || c == ':';
     });
 }
+json time_map(const json& project, std::int64_t end) {
+    auto result = json::array();
+    for (const auto& track : project.at("tracks")) for (const auto& event : track.at("events"))
+        if (event.at("kind") == "meta" && (event.at("meta_type") == 81 || event.at("meta_type") == 88) &&
+            event.at("tick").get<std::int64_t>() <= end)
+            result.push_back({{"tick", event.at("tick")}, {"order", event.value("order", std::int64_t{1})}, {"meta_type", event.at("meta_type")}, {"data", event.at("data")}});
+    std::stable_sort(result.begin(), result.end(), [](const json& a, const json& b) {
+        if (a["tick"] != b["tick"]) return a["tick"].get<std::int64_t>() < b["tick"].get<std::int64_t>();
+        return a["order"].get<std::int64_t>() < b["order"].get<std::int64_t>();
+    });
+    for (auto& item : result) item.erase("order");
+    return result;
+}
+void validate_provenance(const json& p) {
+    require(p.is_object() && p.size() == 12 && p.value("kind", "") == "vst3_capture" && p.value("version", 0) == 1, "Invalid capture provenance");
+    for (const char* name : {"source_track_id", "catalog_id", "class_id", "plugin_version"}) string_field(p, name, 256);
+    for (const char* name : {"midi_sha256", "input_sha256", "state_sha256"}) {
+        auto value = string_field(p, name, 64);
+        require(value.size() == 64 && std::all_of(value.begin(), value.end(), [](char c) { return (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f'); }), "Invalid provenance digest");
+    }
+    field_number(p, "source_revision", 0, max_tick);
+    auto start = field_number(p, "start_tick", 0, 2147483647);
+    require(field_number(p, "end_tick", 1, 2147483647) > start, "Invalid capture interval");
+}
 void validate_instrument(const json& instrument) {
     require(instrument.is_object(), "instrument must be an object");
     // Legacy opaque instrument settings remain round-trippable. Catalog-backed
@@ -61,7 +86,8 @@ void validate_instrument(const json& instrument) {
     if (!instrument.contains("catalog_id")) return;
     for (auto it = instrument.begin(); it != instrument.end(); ++it)
         require(it.key() == "backend" || it.key() == "catalog_id" || it.key() == "state_base64" ||
-                it.key() == "sound_id" || it.key() == "plugin_version" || it.key() == "warmup_ms" || it.key() == "realtime" || it.key() == "preroll_ms", "Unknown catalog instrument field");
+                it.key() == "sound_id" || it.key() == "plugin_version" || it.key() == "warmup_ms" || it.key() == "realtime" || it.key() == "preroll_ms" || it.key() == "performance", "Unknown catalog instrument field");
+    if (instrument.contains("performance") && !instrument["performance"].is_null()) cantabile::validate_performance(instrument["performance"]);
     require(instrument.value("backend", "") == "vst3", "Catalog instruments require VST3");
     require(valid_id(string_field(instrument, "catalog_id", 128)), "Invalid catalog ID");
     if (instrument.contains("sound_id")) require(valid_id(string_field(instrument, "sound_id", 128)), "Invalid sound ID");
@@ -169,6 +195,7 @@ void normalize(json& project) {
         for (const char* field : {"muted", "solo"})
             if (track.contains(field)) require(track[field].is_boolean(), std::string(field) + " must be boolean");
         if (track.contains("instrument")) validate_instrument(track["instrument"]);
+        if (track.contains("provenance")) validate_provenance(track["provenance"]);
         for (const auto& [field, lo, hi] : {std::tuple{"volume", 0., 4.}, std::tuple{"pan", -1., 1.}})
             if (track.contains(field)) require(track[field].is_number() && std::isfinite(track[field].get<double>()) &&
                 track[field].get<double>() >= lo && track[field].get<double>() <= hi, std::string("Invalid ") + field);
@@ -205,6 +232,28 @@ void apply_command(json& project, const json& command) {
             track = copy["tracks"].back();
         }
         project["tracks"].push_back(track);
+    } else if (op == "track.import_midi") {
+        // Append only: never replace input, timing, assignments or other tracks.
+        auto id = string_field(command, "track_id", 128);
+        require(valid_id(id), "Invalid destination track ID");
+        for (const auto& existing : project["tracks"]) require(existing["id"] != id, "Destination already exists", "TRACK_EXISTS");
+        const auto& provenance = command.at("provenance"); validate_provenance(provenance);
+        json imported;
+        try { imported = cantabile::import_midi(cantabile::base64_decode(string_field(command, "data_base64", 1398104))); }
+        catch (const std::exception& e) { throw Error("INVALID_MIDI", e.what()); }
+        require(imported["ppq"] == project["ppq"] && time_map(imported, provenance["end_tick"]) == time_map(project, provenance["end_tick"]),
+            "Capture timing differs from the current project", "CAPTURE_TIMING_CONFLICT");
+        require(imported["tracks"].size() == 2, "Capture must contain conductor and output tracks");
+        json events = json::array();
+        for (const auto& track : imported["tracks"]) for (auto e : track["events"]) {
+            if (e["kind"] == "meta") continue;
+            require(e["kind"] == "midi", "Unsupported capture data");
+            e.erase("id"); events.push_back(std::move(e));
+        }
+        require(!events.empty(), "Capture contains no events", "CAPTURE_EMPTY");
+        project["smf_format"] = 1;
+        project["tracks"].push_back({{"id", id}, {"name", string_field(command, "name", 128)},
+            {"channel", 0}, {"muted", true}, {"events", events}, {"end_tick", imported["tracks"][1]["end_tick"]}, {"provenance", provenance}});
     } else if (op == "track.remove") {
         auto& track = find_track(project, command);
         auto id = track["id"];
@@ -299,6 +348,7 @@ public:
         require(request.is_object(), "Request must be an object", "INVALID_REQUEST");
         auto op = string_field(request, "op", 64);
         if (op == "project.get") return state();
+        if (op == "performance.validate") { cantabile::validate_performance(request.at("data")); return {{"ok", true}}; }
         if (op == "audio.plan") {
             if (request.contains("expected_revision")) guard(request);
             const auto selected = request.value("track_id", std::string{});

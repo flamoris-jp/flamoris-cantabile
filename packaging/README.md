@@ -61,7 +61,7 @@ permission, actual MIDI edits, audio rendering, full-byte retrieval, and client
 listening must be accepted separately.
 
 The reviewed static template is `config/mcps/_cantabile.example.json` (JSON is
-valid YAML). It is generated from the development host's 34-tool catalog, including
+valid YAML). It is generated from the development host's 39-tool catalog, including
 schemas and annotations. Match its upstream ID and product ID to the dedicated
 WSS endpoint and provide the separate connector-token environment variable.
 Underscore-prefixed templates are ignored by Hub until an operator copies one to

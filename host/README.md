@@ -204,7 +204,7 @@ locally built test dependencies. No live infrastructure is needed.
 
 ## Catalog-backed VST3 project tools (development)
 
-The development catalog now has 28 tools including `mcp.context`. The published
+The development catalog now has 39 tools including `mcp.context`. The published
 preview/deployed older catalogs retain their separately recorded counts. Regenerate
 and refresh the upstream tool catalog when updating a development host.
 
@@ -222,3 +222,7 @@ under `result`; projects without catalog assignments retain the legacy response.
 See the [complete contract, quotas and workstation gate](../docs/VST3_PROJECTS.md)
 for exact fields, configuration, state-save workflow and compatibility. Source
 and test-plugin verification do not establish commercial band acceptance.
+
+## Performance and MIDI output (development)
+
+See [VST3_PERFORMANCE.md](../docs/VST3_PERFORMANCE.md) for `vst_capture_begin`, `vst_capture_preview`, `vst_capture_import`, `instrument_state_import`, and `sound_performance_set`. Capture uses existing async job/status/cancel and immutable artifacts. Native import appends a new muted track with timing checks/history/provenance; no output loopback is enabled.

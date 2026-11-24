@@ -82,7 +82,7 @@ def inspect_piano(worker, plugin):
     midi_output = report["midi_output"]
     assert isinstance(midi_output["bus_count"], int) and midi_output["bus_count"] >= 0, midi_output
     assert midi_output["available"] == (midi_output["bus_count"] > 0), midi_output
-    assert midi_output["capture_supported"] is False, midi_output
+    assert midi_output["capture_supported"] is True, midi_output
     # Repeat in a fresh process. Inspector must not alter any public parameter.
     repeat = invoke(worker, "inspect", "--plugin", plugin, "--class-id", piano["id"])
     assert [(p["id"], p["value"]) for p in repeat["parameters"]] == [

@@ -1,6 +1,7 @@
 using System.Buffers.Binary;
 using System.Text;
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using Flamoris.Mcp.Core;
 
 namespace Flamoris.Cantabile.Host;
@@ -15,7 +16,7 @@ public sealed class SoundShelf(Workspace workspace, VstCatalog catalog)
     public sealed record Verification(bool InitialAudible, bool RestoredAudible, bool HumanReviewed, string Evidence, string? CheckedAt);
     public sealed record Entry(string SoundId, string DisplayName, string Category, string[] Roles, string[] Tags,
         string ClassificationSource, string CatalogId, string ClassId, string PluginVersion, string StateBase64,
-        string StateSha256, int StateSize, int WarmupMs, bool Realtime, string CreatedAt, Verification Verification, int PrerollMs = 0);
+        string StateSha256, int StateSize, int WarmupMs, bool Realtime, string CreatedAt, Verification Verification, int PrerollMs = 0, JsonElement? Performance = null);
     private string FilePath(string id)
     {
         if (!id.StartsWith("sound-", StringComparison.Ordinal) || !Guid.TryParseExact(id[6..], "N", out _)) throw new McpFault("invalid_sound_id");
@@ -32,6 +33,12 @@ public sealed class SoundShelf(Workspace workspace, VstCatalog catalog)
                 entry.ClassId.Length != 32 || !entry.ClassId.All(char.IsAsciiHexDigit) || entry.StateSha256.Length != 64 ||
                 entry.Roles.Length > 16 || entry.Tags.Length > 16 || entry.Verification is null) throw new JsonException();
             if (checkState) _ = State(entry);
+            if (entry.Performance is { } performance) {
+                ValidatePerformance(performance);
+                if (performance.TryGetProperty("capture_evidence", out var evidence) &&
+                    (evidence.GetProperty("state_sha256").GetString() != entry.StateSha256 || evidence.GetProperty("class_id").GetString() != entry.ClassId ||
+                        evidence.GetProperty("plugin_version").GetString() != entry.PluginVersion)) throw new JsonException();
+            }
             return entry;
         }
         catch (Exception e) when (e is JsonException or FormatException or NullReferenceException or ArgumentException)
@@ -98,7 +105,8 @@ public sealed class SoundShelf(Workspace workspace, VstCatalog catalog)
         try { _ = Installed(entry); } catch (McpFault failure) { error = failure.Code; }
         return new { sound_id = entry.SoundId, display_name = entry.DisplayName, category = entry.Category, roles = entry.Roles,
             tags = entry.Tags, classification_source = entry.ClassificationSource, catalog_id = entry.CatalogId,
-            class_id = entry.ClassId, plugin_version = entry.PluginVersion,
+            class_id = entry.ClassId, plugin_version = entry.PluginVersion, performance = entry.Performance,
+            performance_evidence_source = "operator_declaration_with_optional_host_observed_capture",
             state = new { reference = entry.SoundId, sha256 = entry.StateSha256, size = entry.StateSize, captured = true },
             loading = new { warmup_ms = entry.WarmupMs, realtime = entry.Realtime, preroll_ms = entry.PrerollMs }, created_at = entry.CreatedAt,
             verification = new { initial_audible = entry.Verification.InitialAudible, restored_audible = entry.Verification.RestoredAudible,
@@ -154,9 +162,10 @@ public sealed class SoundShelf(Workspace workspace, VstCatalog catalog)
     }
     public static JsonElement SearchInput(JsonElement input)
     {
-        Closed(input, "category", "role", "tag", "verification", "offset", "limit");
+        Closed(input, "category", "role", "tag", "control_kind", "verification", "offset", "limit");
+        if (input.TryGetProperty("control_kind", out _) && Text(input, "control_kind") is not ("trigger" or "keyswitch" or "pattern" or "cc" or "parameter" or "gui")) throw new ArgumentException();
         foreach (string field in new[] { "category", "role", "tag" }) if (input.TryGetProperty(field, out _)) _ = Text(input, field, 64);
-        if (input.TryGetProperty("verification", out _) && Text(input, "verification") is not ("initial_audible" or "state_captured" or "restored_audible" or "human_reviewed" or "unverified")) throw new ArgumentException();
+        if (input.TryGetProperty("verification", out _) && Text(input, "verification") is not ("initial_audible" or "state_captured" or "restored_audible" or "human_reviewed" or "unverified" or "capture_observed")) throw new ArgumentException();
         if (input.TryGetProperty("offset", out var offset) && offset.GetInt32() is < 0 or > MaximumSounds) throw new ArgumentException();
         if (input.TryGetProperty("limit", out var limit) && limit.GetInt32() is < 1 or > 32) throw new ArgumentException();
         return input.Clone();
@@ -177,7 +186,10 @@ public sealed class SoundShelf(Workspace workspace, VstCatalog catalog)
                 if (input.TryGetProperty("verification", out var verification) && !(verification.GetString() switch {
                     "initial_audible" => entry.Verification.InitialAudible, "state_captured" => true,
                     "restored_audible" => entry.Verification.RestoredAudible, "human_reviewed" => entry.Verification.HumanReviewed,
+                    "capture_observed" => entry.Performance is { } observed && observed.TryGetProperty("capture_evidence", out _),
                     _ => !entry.Verification.RestoredAudible })) continue;
+                if (input.TryGetProperty("control_kind", out var controlKind) && (entry.Performance is not { } performance ||
+                    !performance.GetProperty("controls").EnumerateArray().Any(c => c.GetProperty("kind").GetString() == controlKind.GetString()))) continue;
                 matches.Add(View(entry));
             }
             int offset = input.TryGetProperty("offset", out var o) ? o.GetInt32() : 0, limit = input.TryGetProperty("limit", out var l) ? l.GetInt32() : 16;
@@ -211,8 +223,35 @@ public sealed class SoundShelf(Workspace workspace, VstCatalog catalog)
             File.Delete(FilePath(id)); return JsonSerializer.SerializeToElement(new { sound_id = id, removed = true });
         }
     }
+    internal static void ValidatePerformance(JsonElement value)
+    {
+        if (System.Text.Encoding.UTF8.GetByteCount(value.GetRawText()) > 16384) throw new ArgumentException();
+        using var native = new NativeEngine(); native.Call(new { op = "performance.validate", data = value });
+    }
+    internal JsonElement SetPerformance(string id, string expected, JsonElement performance, JsonElement? captureReport = null)
+    {
+        ValidatePerformance(performance);
+        lock (gate)
+        {
+            var entry = Read(id); if (entry.StateSha256 != expected) throw new McpFault("sound_changed");
+            if (performance.TryGetProperty("capture_evidence", out _)) throw new ArgumentException("Capture evidence is host-owned.");
+            if (captureReport is { } report) {
+                var p = report.GetProperty("provenance");
+                if (report.GetProperty("capture_status").GetString() != "captured" || p.GetProperty("state_sha256").GetString() != entry.StateSha256 ||
+                    p.GetProperty("class_id").GetString() != entry.ClassId || p.GetProperty("plugin_version").GetString() != entry.PluginVersion)
+                    throw new McpFault("sound_capture_mismatch");
+                var metadata = JsonNode.Parse(performance.GetRawText())!.AsObject(); var evidence = new JsonObject();
+                foreach (string f in new[] { "state_sha256", "input_sha256", "midi_sha256", "class_id", "plugin_version", "source_revision" })
+                    evidence[f] = JsonNode.Parse(p.GetProperty(f).GetRawText());
+                evidence["event_count"] = report.GetProperty("event_count").GetInt32(); metadata["capture_evidence"] = evidence;
+                performance = JsonSerializer.SerializeToElement(metadata); ValidatePerformance(performance);
+            }
+            entry = entry with { Performance = performance.Clone() }; Write(entry, true);
+            return JsonSerializer.SerializeToElement(View(entry));
+        }
+    }
     internal static object Instrument(Entry entry) => new { backend = "vst3", catalog_id = entry.CatalogId, state_base64 = entry.StateBase64,
-        sound_id = entry.SoundId, plugin_version = entry.PluginVersion, warmup_ms = entry.WarmupMs, realtime = entry.Realtime, preroll_ms = entry.PrerollMs };
+        sound_id = entry.SoundId, plugin_version = entry.PluginVersion, warmup_ms = entry.WarmupMs, realtime = entry.Realtime, preroll_ms = entry.PrerollMs, performance = entry.Performance };
 
     // Original, fixed test notes. No bundled/vendor phrase collections.
     internal static byte[] PreviewMidi(string phrase)

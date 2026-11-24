@@ -84,6 +84,17 @@ jobs:
           $plugin = (Resolve-Path build-vst/VST3/Release/mda-vst3.vst3).Path
           python audio/vst3/tests/sound_shelf_smoke.py $worker $plugin $core
           if ($LASTEXITCODE) { exit $LASTEXITCODE }
+      - name: VST3 MIDI capture and native import through the real SDK
+        # The preceding gates exercise public instruments; capture uses an
+        # original synthetic MIDI-output fixture and actual SDK process calls.
+        shell: pwsh
+        run: |
+          $worker = (Resolve-Path build-vst/audio/vst3/Release/cantabile-client.exe).Path
+          $core = (Resolve-Path build-vst/Release/cantabile_core.dll).Path
+          $fixture = (Resolve-Path build-vst/VST3/Release/cantabile-capture-fixture.vst3).Path
+          $mda = (Resolve-Path build-vst/VST3/Release/mda-vst3.vst3).Path
+          python audio/vst3/tests/capture_smoke.py $worker $fixture $core $mda
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
       - name: Prepare portable preview
         shell: pwsh
         run: |
@@ -100,6 +111,7 @@ jobs:
           Copy-Item docs/VST3_CONTROL.md client-package/docs/VST3_CONTROL.md
           Copy-Item docs/VST3_PROJECTS.md client-package/docs/VST3_PROJECTS.md
           Copy-Item docs/SOUND_SHELF.md client-package/docs/SOUND_SHELF.md
+          Copy-Item docs/VST3_PERFORMANCE.md client-package/docs/VST3_PERFORMANCE.md
           Copy-Item "$env:RUNNER_TEMP/vst3sdk/LICENSE.txt" client-package/VST3-SDK-LICENSE.txt
           Copy-Item "$env:RUNNER_TEMP/vst3sdk/base/LICENSE.txt" client-package/VST3-base-LICENSE.txt
           Copy-Item "$env:RUNNER_TEMP/vst3sdk/public.sdk/LICENSE.txt" client-package/VST3-public-sdk-LICENSE.txt

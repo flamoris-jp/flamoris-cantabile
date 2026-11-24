@@ -91,6 +91,8 @@ struct Options {
     int max_seconds = 600;
     int warmup_ms = 0;
     int preroll_ms = 0;
+    bool capture = false;
+    int start_tick = 0, end_tick = -1, max_events = 8192;
     bool list = false, realtime = false, inspect = false, scripting = false, allow_write = false, floating = false;
 };
 
@@ -111,7 +113,8 @@ Options parse(int argc, Char** argv) {
     options.list = argc > 1 && fs::path(argv[1]) == "list";
     options.inspect = argc > 1 && fs::path(argv[1]) == "inspect";
     options.scripting = argc > 1 && fs::path(argv[1]) == "script";
-    for (int i = (options.list || options.inspect || options.scripting) ? 2 : 1; i < argc; ++i) {
+    options.capture = argc > 1 && fs::path(argv[1]) == "capture";
+    for (int i = (options.list || options.inspect || options.scripting || options.capture) ? 2 : 1; i < argc; ++i) {
         const auto flag = utf8(argv[i]);
         if (flag == "--float-output" && !options.list && !options.inspect && !options.scripting) { options.floating = true; continue; }
         if (flag == "--allow-write" && options.scripting) { options.allow_write = true; continue; }
@@ -131,6 +134,9 @@ Options parse(int argc, Char** argv) {
         else if (flag == "--max-seconds" && !options.list) options.max_seconds = bounded_integer(value, flag, 1, 600);
         else if (flag == "--warmup-ms" && !options.list) options.warmup_ms = bounded_integer(value, flag, 0, 30000);
         else if (flag == "--preroll-ms" && !options.list) options.preroll_ms = bounded_integer(value, flag, 0, 30000);
+        else if (flag == "--start-tick" && options.capture) options.start_tick = bounded_integer(value, flag, 0, 2147483647);
+        else if (flag == "--end-tick" && options.capture) options.end_tick = bounded_integer(value, flag, 1, 2147483647);
+        else if (flag == "--max-events" && options.capture) options.max_events = bounded_integer(value, flag, 1, 8192);
         else fail("INVALID_ARGUMENT", "Unknown option: " + flag);
     }
     if (options.plugin.empty() || (options.scripting && (options.script.empty() || options.workspace.empty())) ||
@@ -166,6 +172,7 @@ struct Timing {
     int tempo_us = 500000;
     int numerator = 4;
     int denominator = 4;
+    long double exact_frame = 0;
 };
 
 struct Score {
@@ -173,9 +180,12 @@ struct Score {
     std::int64_t frames;
     std::vector<Timing> timings;
     std::vector<Message> messages;
+    json conductor = json::array();
+    std::int64_t end_tick = 0;
+    std::vector<Timing> exact_timings{Timing{}};
 };
 
-Score schedule(const fs::path& midi, int max_seconds) {
+Score schedule(const fs::path& midi, int max_seconds, int capture_end = -1, bool allow_empty = false) {
     auto bytes = read_file(midi, 16 * 1024 * 1024, "INVALID_MIDI");
     json project;
     try { project = cantabile::import_midi(bytes); }
@@ -199,11 +209,16 @@ Score schedule(const fs::path& midi, int max_seconds) {
         }
         if (musical) ++musical_tracks;
     }
-    if (musical_tracks != 1)
+    if (musical_tracks > 1 || (musical_tracks == 0 && !allow_empty))
         fail("UNSUPPORTED_MIDI", "Export one instrument part as MIDI; a conductor track may accompany it");
     std::stable_sort(events.begin(), events.end(), [](const json* a, const json* b) {
         return a->at("tick").get<std::int64_t>() < b->at("tick").get<std::int64_t>();
     });
+    if (capture_end >= 0) {
+        if (capture_end > last_tick) fail("INVALID_ARGUMENT", "Capture end exceeds the song end");
+        last_tick = capture_end;
+    }
+    score.end_tick = last_tick;
     long double exact_frame = 0;
     std::int64_t previous_tick = 0;
     Timing active;
@@ -216,6 +231,7 @@ Score schedule(const fs::path& midi, int max_seconds) {
     };
     for (const auto* event : events) {
         auto tick = event->at("tick").get<std::int64_t>();
+        if (tick > last_tick) continue;
         advance(tick);
         auto frame = std::llround(exact_frame);
         const auto& data = event->at("data");
@@ -239,6 +255,10 @@ Score schedule(const fs::path& midi, int max_seconds) {
         }
         active.tick = tick;
         active.frame = frame;
+        active.exact_frame = exact_frame;
+        if (score.exact_timings.back().exact_frame == exact_frame) score.exact_timings.back() = active;
+        else score.exact_timings.push_back(active);
+        auto meta = *event; meta.erase("id"); score.conductor.push_back(std::move(meta));
         if (score.timings.back().frame == frame) score.timings.back() = active;
         else score.timings.push_back(active);
     }
@@ -246,6 +266,8 @@ Score schedule(const fs::path& midi, int max_seconds) {
     score.frames = static_cast<std::int64_t>(std::ceil(exact_frame)) + tail_frames;
     return score;
 }
+
+#include "midi_capture.hpp"
 
 struct Activation {
     IComponent& component;
@@ -341,6 +363,13 @@ json render(const Options& options, const Score& score, PlugProvider& provider, 
     for (int32 i = 1; i < output_count; ++i) component->activateBus(kAudio, kOutput, i, false);
     check(component->activateBus(kAudio, kOutput, 0, true), "Cannot activate main output");
     check(component->activateBus(kEvent, kInput, 0, true), "Cannot activate MIDI input");
+    std::unique_ptr<MidiCapture> capture;
+    if (options.capture) {
+        if (component->getBusCount(kEvent, kOutput) == 0) fail("MIDI_OUTPUT_UNAVAILABLE", "Plugin has no event output bus");
+        if (component->getBusCount(kEvent, kOutput) != 1) fail("MIDI_OUTPUT_UNSUPPORTED", "Capture currently requires one event output bus");
+        check(component->activateBus(kEvent, kOutput, 0, true), "Cannot activate MIDI output");
+        capture = std::make_unique<MidiCapture>(options, score);
+    }
     BusInfo event_info{};
     check(component->getBusInfo(kEvent, kInput, 0, event_info), "Cannot query MIDI input");
     for (const auto& message : score.messages)
@@ -357,12 +386,15 @@ json render(const Options& options, const Score& score, PlugProvider& provider, 
     activation.processing = processing == kResultOk;
     if (options.warmup_ms) wait_until(Clock::now() + std::chrono::milliseconds(options.warmup_ms));
     check_deadline();
-    const auto latency = processor->getLatencySamples();
+    const auto latency = capture ? uint32{0} : processor->getLatencySamples();
     if (latency > static_cast<uint32>(tail_frames))
         fail("VST_UNSUPPORTED", "Plugin latency exceeds two seconds");
 
-    WaveFile wave(options.output);
-    wave.header(static_cast<uint32>(score.frames), sample_rate, options.floating);
+    std::unique_ptr<WaveFile> wave;
+    if (!capture) {
+        wave = std::make_unique<WaveFile>(options.output);
+        wave->header(static_cast<uint32>(score.frames), sample_rate, options.floating);
+    }
     std::array<float, block_size> left{}, right{};
     std::array<Sample32*, 2> buffers{left.data(), right.data()};
     std::vector<AudioBusBuffers> inputs(input_count), outputs(output_count);
@@ -383,6 +415,7 @@ json render(const Options& options, const Score& score, PlugProvider& provider, 
     process.inputs = inputs.data();
     process.outputs = outputs.data();
     process.inputEvents = &events;
+    process.outputEvents = capture.get();
     process.inputParameterChanges = &parameters;
     process.processContext = &context;
 
@@ -408,7 +441,9 @@ json render(const Options& options, const Score& score, PlugProvider& provider, 
             const auto count = static_cast<int32>(std::min<std::int64_t>(block_size, preroll_frames - position));
             context.projectTimeSamples = 0; context.continousTimeSamples = position; context.projectTimeMusic = 0;
             process.numSamples = count; left.fill(0); right.fill(0); outputs[0].silenceFlags = 0;
+            if (capture) capture->begin(0, count, true);
             check(processor->process(process), "VST preroll processing failed");
+            if (capture) capture->finish_block();
             position += count;
             const auto elapsed = std::chrono::duration<double>(static_cast<double>(position) / sample_rate);
             wait_until(preroll_start + std::chrono::duration_cast<Clock::duration>(elapsed));
@@ -426,6 +461,11 @@ json render(const Options& options, const Score& score, PlugProvider& provider, 
                score.timings[timing_index + 1].frame <= position) ++timing_index;
         const auto& timing = score.timings[timing_index];
         auto block_end = std::min(position + block_size, end);
+        if (capture) {
+            const auto stop = score.frames - tail_frames;
+            if (position <= stop) block_end = std::min(block_end, stop + 1);
+            if (position > stop) context.state &= ~ProcessContext::kPlaying;
+        }
         if (timing_index + 1 < score.timings.size())
             block_end = std::min(block_end, score.timings[timing_index + 1].frame);
         // Deliver events at offset zero in variable-sized blocks without moving
@@ -455,7 +495,9 @@ json render(const Options& options, const Score& score, PlugProvider& provider, 
         left.fill(0);
         right.fill(0);
         outputs[0].silenceFlags = 0;
+        if (capture) capture->begin(position, count, false);
         check(processor->process(process), "VST audio processing failed");
+        if (capture) { capture->finish_block(); position = block_end; continue; }
         std::size_t pcm_size = 0;
         for (int32 i = 0; i < count; ++i) {
             if (position + i < latency) continue;
@@ -469,11 +511,12 @@ json render(const Options& options, const Score& score, PlugProvider& provider, 
                     pcm[pcm_size++] = static_cast<unsigned char>(value >> (b * 8));
             }
         }
-        wave.bytes(pcm.data(), pcm_size);
+        wave->bytes(pcm.data(), pcm_size);
         position = block_end;
     }
+    if (capture) return capture->publish(options.output);
     if (peak < 0.5 / 32767) fail("SILENT_AUDIO", "VST produced no audible PCM; check its preset and samples");
-    wave.publish();
+    wave->publish();
     return {{"ok", true}, {"backend", "vst3"}, {"sample_rate", sample_rate},
             {"process_mode", options.realtime ? "realtime" : "offline"},
             {"preroll_ms", options.preroll_ms},
@@ -526,7 +569,13 @@ json run(const Options& options) {
         if (options.inspect) return report;
         return execute_script(options, *request, provider, report);
     }
-    auto score = schedule(options.midi, options.max_seconds);
+    auto score = schedule(options.midi, options.max_seconds, options.capture ? options.end_tick : -1, options.capture);
+    if (options.capture && (options.start_tick >= score.end_tick || score.end_tick > 2147483647))
+        fail("INVALID_ARGUMENT", "Capture requires 0 <= start_tick < end_tick <= 2147483647");
+    if (options.capture) {
+        const auto stop = score.frames - tail_frames;
+        std::erase_if(score.messages, [&](const Message& m) { return m.frame > stop; });
+    }
     return render(options, score, provider);
 }
 
@@ -537,6 +586,8 @@ int main_for(int argc, Char** argv) {
             std::cout << "cantabile-client list --plugin PATH.vst3\n"
                          "cantabile-client inspect --plugin PATH.vst3 [--class-id ID] [--preset FILE.vstpreset]\n"
                          "cantabile-client script --plugin PATH.vst3 --script REQUEST.json --workspace DIR [--allow-write]\n"
+                         "cantabile-client capture --plugin PATH.vst3 --midi PART.mid --output GENERATED.mid\n"
+                         "                 [--start-tick 0] [--end-tick N] [--max-events 8192]\n"
                          "cantabile-client --plugin PATH.vst3 [--class-id ID] [--preset FILE.vstpreset]\n"
                          "                 --midi PART.mid --output OUT.wav [--max-seconds 600]\n"
                          "                 [--realtime] [--warmup-ms 0] [--preroll-ms 0] [--float-output]\n";

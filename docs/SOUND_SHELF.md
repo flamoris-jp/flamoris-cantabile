@@ -121,3 +121,7 @@ MDA test `audio/vst3/tests/sound_shelf_smoke.py WORKER MODULE CORE_LIBRARY`
 checks changed-state audio, independent instances and fresh-session recall;
 the Windows workflow runs it before packaging. It does not establish commercial
 instrument or vocal-engine acceptance.
+
+## Optional performance declarations
+
+The development host can attach versioned, source-attributed control declarations to an expected sound-state digest with `sound_performance_set`. `sound_search` returns them and accepts `control_kind`; assignment copies them into the native project. These are operator declarations, separate from actual event capture and audibility evidence. See [VST3_PERFORMANCE.md](VST3_PERFORMANCE.md) for the closed schema, limits and standard preset ingress.

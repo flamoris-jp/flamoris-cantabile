@@ -65,9 +65,10 @@ possible vendor extension. Unsupported optional interfaces are recorded rather
 than replaced with guessed values. A zero mapped-controller count does not prove
 the instrument has no MIDI behavior outside `IMidiMapping`.
 
-An event output bus is evidence of a public MIDI-output capability. This version
-reports `capture_supported: false`; it does not collect output events, export an
-internal Song Track, or prove that a GUI composition action has a public API.
+An event output bus is evidence of a public MIDI-output capability. Inspector now reports host `capture_supported: true`, instance bus compatibility
+and an unmeasured event count. Actual output is collected only by the separate
+[bounded capture job](VST3_PERFORMANCE.md); neither an output bus nor host support
+proves that a GUI composition action has a public API.
 Program information likewise does not imply Program Change rendering support:
 the existing renderer still rejects Program Change instead of guessing a sound.
 
@@ -259,7 +260,7 @@ EZkeys 2 MIDI render does not certify these new controls.
    Exact byte equality is suitable only when the instrument is deterministic.
 5. Test one mapped CC only if Inspector reports its assignment. Unmapped CC and
    Program Change must return explicit errors. Record event output bus presence
-   separately; actual MIDI-output capture remains unsupported in this phase.
+   separately; use the separate bounded capture job to measure actual output.
 6. Run a failing script after a reversible change and inspect its rollback
    result. Confirm no new output file was published and a fresh worker still
    starts from the original private preset. Check operation/time/path limits

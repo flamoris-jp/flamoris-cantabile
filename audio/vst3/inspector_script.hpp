@@ -139,8 +139,9 @@ json inspect_plugin(const Options& options, PlugProvider& provider) {
             report["programs"].push_back({{"id", list.id}, {"name", text128(list.name)}, {"program_count", list.programCount}, {"programs", std::move(programs)}});
         }
     }
-    report["midi_output"] = {{"bus_count", event_outputs}, {"available", event_outputs > 0}, {"capture_supported", false},
-                             {"status", event_outputs ? "event_bus_advertised_capture_not_implemented" : "no_event_output_bus"}};
+    report["midi_output"] = {{"bus_count", event_outputs}, {"available", event_outputs > 0}, {"capture_supported", true},
+                             {"status", event_outputs == 1 ? "event_bus_advertised_capture_unmeasured" : event_outputs ? "multiple_event_output_buses_unsupported" : "no_event_output_bus"},
+                             {"instance_capture_compatible", event_outputs == 1}, {"observed_event_count", nullptr}};
     report["phase1_passed"] = true;
     report["render_supported"] = processor && processor->canProcessSampleSize(kSample32) == kResultOk;
     if (report.dump().size() > maximum_response_bytes) fail("RESPONSE_LIMIT", "Inspector JSON exceeds response limit");

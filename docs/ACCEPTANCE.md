@@ -219,3 +219,26 @@ package have their own run results. Installed commercial instruments, real
 licensed library/preset choices, human playback of a commercial three-part song
 and production Hub acceptance remain pending. Do not describe this as accepted
 production band support until those checks have been recorded privately.
+
+
+## Issue #15 development verification (2026-11-24)
+
+The generic implementation adds VST3 output-event capture, explicit native
+append/history/provenance, bounded standard preset ingress and sourced sound
+performance declarations. Details and exact boundaries are in
+[VST3_PERFORMANCE.md](VST3_PERFORMANCE.md).
+
+Local Linux x64 verification: native/C++ and .NET Release builds passed with no
+.NET warnings/errors; CTest 1, native 33, host 27, audio 17 and packaging 10 tests
+passed. The actual 39-tool host catalog matches the generated Hub descriptor.
+All seven existing real SDK MDA Inspector/Script/render/MCP/band/shelf gates
+passed. The new original-fixture SDK capture gate passed, including timing,
+overlap/pressure, postroll, empty/invalid/unsupported output, quotas, crash and
+cancellation, immutable snapshots, append/Undo/Redo/restart, changed-state recall
+and state-matched observed capture evidence. No mock is counted as an SDK pass.
+
+Windows CI belongs to the exact PR source/checks. Deployed host/core, current Hub
+catalog, commercial library controls/output, the original short composition and
+human listening remain separate workstation gates. Issues #8/#10/#12/#15 are
+not closed by this generic source acceptance. No private installed inventory,
+commercial state, audio, paths or live logs are included here.
