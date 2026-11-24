@@ -58,7 +58,8 @@ internal sealed class KontaktPreparation(Workspace workspace)
             try {
                 string value = System.Text.Encoding.ASCII.GetString(Workspace.ReadBounded(Path.Combine(sandbox, "prepare.progress"), 64));
                 if (value is "editor_open" or "dialog_owned" or "dialog_common" or "filename_control" or "file_submitted" or "lua_receipt" or "state_captured" or
-                    "dialog_filename_missing" or "dialog_type_missing" or "dialog_browser_missing" or "dialog_buttons_missing") stage = value;
+                    "dialog_filename_missing" or "dialog_type_missing" or "dialog_browser_missing" or "dialog_buttons_missing" or
+                    "shortcut_vst_sent" or "shortcut_native_target" or "shortcut_native_posted") stage = value;
             } catch { }
             string code = error is WorkerFailure workerFailure ? workerFailure.Code : error is McpFault fault ? fault.Code : "kontakt_prepare_failed";
             workspace.VstAudit("kontakt_prepare_begin", code, 1);

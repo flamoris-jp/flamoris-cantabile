@@ -30,6 +30,13 @@ assigns MIDI channel 1. A per-job receipt confirms that this sequence returned
 successfully. The host then requests standard VST3 state with
 `PresetFile::savePreset`; no vendor binary rewriting or assumed `.nkm` conversion.
 
+If the SDK callback declines F11 without opening a dialog or producing a receipt,
+the worker posts one native F11 down/up pair to its own editor's existing focused
+child, or its single visible direct plugin child. It does not change foreground
+focus, send global input, guess among multiple children or retry after an observed
+dialog. Both paths retain the same receipt and standard-state checks. A declined
+SDK callback alone does not establish that Developer features are disabled.
+
 The result is one immutable `.vstpreset` artifact (existing 1 MiB bound), selected
 IDs and source revision. It reports `audible_verified:false` and
 `project_changed:false`. Preparation never edits the current project or shelf.
@@ -104,9 +111,16 @@ inventory belong in this public repository. The sample above is fictitious.
 
 The official API documents GUI/command-line execution, but no standard external
 VST3 RPC for Lua. The editor bridge is explicit and experimental. Versions with
-another dialog or without F11 handling through `IPlugView` may fail with
-`KONTAKT_LUA_UNAVAILABLE` / `vst_timeout`; that is not a successful load. The direct
+another dialog, an ambiguous native editor hierarchy or no supported F11 route
+may fail with `KONTAKT_EDITOR_UNSUPPORTED`, `KONTAKT_LUA_UNAVAILABLE` or
+`vst_timeout`; that is not a successful load. Bounded failure diagnostics identify
+SDK dispatch, native target selection and native dispatch separately, without
+window text, handles or filesystem paths. The direct
 CLI must also be supervised because a vendor modal UI can block its calling thread.
+
+Kontakt's separately enabled MCP server is documented for instrument/UI
+development. This adapter does not enable or connect to it. Its presence alone
+does not establish instrument/snapshot loading or VST3 state transfer support.
 
 ## Verification and remaining workstation gates
 
@@ -116,7 +130,9 @@ synthetic plugin with deliberate Kontakt routing metadata solely for this test.
 It contains no NI code, instruments, samples or Lua. It tests actual SDK editor
 calls, native Open dialog, generated path decoding, changed standard state,
 guarded application, Undo/Redo/save/reopen, failure and cancellation. The fixture
-is neither installed nor included in the portable package.
+also exercises SDK-handled keys, native-only keys, a declined SDK callback after
+successful loading, absent/ambiguous native children and unsupported shortcuts.
+It is neither installed nor included in the portable package.
 
 An independent Lua 5.4 gate executes the actual generated script against a
 synthetic `Kontakt` table to check Unicode/quote/backslash injection resistance,
@@ -137,3 +153,5 @@ additional tests; a loaded sound is not a composition API.
 - Steinberg SDK `pluginterfaces/gui/iplugview.h`, `base/keycodes.h`, and
   `public.sdk/source/vst/vstpresetfile.h` in the CI-pinned SDK.
 - [Windows common-dialog folder query](https://learn.microsoft.com/en-us/windows/win32/dlgbox/cdm-getfolderpath)
+- [Windows key message contract](https://learn.microsoft.com/en-us/windows/win32/inputdev/wm-keydown)
+- [Kontakt MCP development workflow](https://developer.native-instruments.com/komplete-ui/docs/FigmaMCPTutorial/)
