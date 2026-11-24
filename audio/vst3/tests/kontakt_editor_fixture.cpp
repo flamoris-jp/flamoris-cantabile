@@ -43,7 +43,7 @@ public:
 class Controller;
 class Editor final : public CPluginView {
     Controller& controller;
-    HWND child{}, extra{};
+    HWND child{}, extra{}, nested{};
     bool opened = false;
     std::string mode;
     void run_lua_dialog();
@@ -52,7 +52,7 @@ public:
     explicit Editor(Controller& c) : controller(c) {
         rect = {0,0,400,200};
         const char* value = std::getenv("CANTABILE_FIXTURE_KONTAKT_KEYS");
-        mode = value ? value : "native";
+        mode = value ? value : "native-focus";
     }
     tresult PLUGIN_API isPlatformTypeSupported(FIDString type) override { return std::string(type) == kPlatformTypeHWND ? kResultTrue : kResultFalse; }
     tresult PLUGIN_API attached(void* parent, FIDString type) override;
@@ -92,6 +92,8 @@ tresult Editor::attached(void* parent, FIDString type) {
     if (!RegisterClassW(&klass) && GetLastError() != ERROR_CLASS_ALREADY_EXISTS) return kResultFalse;
     child = CreateWindowExW(0, klass.lpszClassName, L"", WS_CHILD | WS_VISIBLE,
         0, 0, 400, 200, static_cast<HWND>(parent), nullptr, klass.hInstance, this);
+    if (mode == "native-nested-focus") nested = CreateWindowExW(0, klass.lpszClassName, L"", WS_CHILD | WS_VISIBLE,
+        0, 0, 400, 200, child, nullptr, klass.hInstance, this);
     if (mode == "ambiguous") extra = CreateWindowExW(0, L"STATIC", L"", WS_CHILD | WS_VISIBLE,
         0, 0, 10, 10, static_cast<HWND>(parent), nullptr, klass.hInstance, nullptr);
     return child ? kResultOk : kResultFalse;
@@ -99,7 +101,7 @@ tresult Editor::attached(void* parent, FIDString type) {
 tresult Editor::removed() {
     if (extra) DestroyWindow(extra);
     if (child) DestroyWindow(child);
-    child = extra = nullptr;
+    child = extra = nested = nullptr;
     return CPluginView::removed();
 }
 LRESULT CALLBACK Editor::native_window(HWND window, UINT message, WPARAM wparam, LPARAM lparam) {
@@ -108,7 +110,15 @@ LRESULT CALLBACK Editor::native_window(HWND window, UINT message, WPARAM wparam,
         SetWindowLongPtrW(window, GWLP_USERDATA, reinterpret_cast<LONG_PTR>(create->lpCreateParams));
     }
     auto* editor = reinterpret_cast<Editor*>(GetWindowLongPtrW(window, GWLP_USERDATA));
+    if (message == WM_SETFOCUS && editor && window == editor->child && editor->nested) {
+        SetFocus(editor->nested);
+        return 0;
+    }
     if (message == WM_KEYDOWN && wparam == VK_F11 && editor && editor->mode != "none") {
+        if (editor->mode.find("focus") != std::string::npos && GetFocus() != window) {
+            std::cerr << "synthetic_f11_unfocused=true\n";
+            return 0;
+        }
         std::cerr << "synthetic_native_f11=true\n";
         editor->run_lua_dialog();
         return 0;
@@ -116,9 +126,16 @@ LRESULT CALLBACK Editor::native_window(HWND window, UINT message, WPARAM wparam,
     return DefWindowProcW(window, message, wparam, lparam);
 }
 tresult Editor::onKeyDown(char16, int16 key, int16) {
-    if (key != KEY_F11 || (mode != "sdk" && mode != "sdk-false")) return kResultFalse;
+    if (key != KEY_F11) return kResultFalse;
+    if (mode == "native-parent-focus") {
+        SetFocus(static_cast<HWND>(systemWindow));
+        std::cerr << "synthetic_parent_focus_forwarded=" << (GetFocus() == child ? "true" : "false") << '\n';
+        return kResultFalse;
+    }
+    if (mode != "sdk" && mode != "sdk-false" && mode != "sdk-focus") return kResultFalse;
+    if (mode == "sdk-focus" && GetFocus() != child) return kResultFalse;
     run_lua_dialog();
-    return mode == "sdk" ? kResultTrue : kResultFalse;
+    return mode == "sdk-false" ? kResultFalse : kResultTrue;
 }
 void Editor::run_lua_dialog() {
     if (opened) { std::cerr << "synthetic_duplicate_f11=true\n"; return; }

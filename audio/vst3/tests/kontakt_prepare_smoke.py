@@ -93,7 +93,7 @@ def main():
         config = root / "libraries.json"
         config.write_text(json.dumps({"version": 1, "libraries": [{"id": "original", "name": "Synthetic", "root": str(library)}]}))
         os.environ.update(CANTABILE_KONTAKT_LIBRARIES=str(config), CANTABILE_KONTAKT_PREPARE="true",
-                          CANTABILE_VST3_PATHS=fixture, CANTABILE_FIXTURE_KONTAKT_KEYS="native")
+                          CANTABILE_VST3_PATHS=fixture, CANTABILE_FIXTURE_KONTAKT_KEYS="native-focus")
         client = test_host.Client(root / "workspace")
         try:
             scan = wait(client, client.tool("vst_scan", {}))
@@ -168,7 +168,7 @@ def main():
             # SDK-only, SDK returning false after opening, absent/ambiguous
             # native children, and an editor that handles neither route.
             # Every attempt is a fresh subprocess with a bounded deadline.
-            for mode in ("sdk", "sdk-false", "missing", "ambiguous", "none"):
+            for mode in ("sdk", "sdk-focus", "sdk-false", "native", "native-nested-focus", "native-parent-focus", "missing", "ambiguous", "none"):
                 attempt = root / ("keys-" + mode)
                 attempt.mkdir()
                 (attempt / "prepare.json").write_text(json.dumps(dict(version=1, nonce="e"*32,
@@ -180,9 +180,15 @@ def main():
                     text=True, timeout=35, env=dict(os.environ, CANTABILE_FIXTURE_KONTAKT_KEYS=mode))
                 published = attempt / "prepared.vstpreset"
                 assert "synthetic_duplicate_f11" not in direct.stderr, (mode, direct.stderr)
-                if mode in ("sdk", "sdk-false"):
+                assert "synthetic_f11_unfocused" not in direct.stderr, (mode, direct.stderr)
+                if mode in ("sdk", "sdk-focus", "sdk-false", "native", "native-nested-focus", "native-parent-focus"):
                     assert direct.returncode == 0 and published.exists(), (mode, direct.stdout, direct.stderr)
-                    assert "synthetic_native_f11" not in direct.stderr, (mode, direct.stderr)
+                    if mode.startswith("sdk"):
+                        assert "synthetic_native_f11" not in direct.stderr, (mode, direct.stderr)
+                    else:
+                        assert "synthetic_native_f11=true" in direct.stderr, (mode, direct.stderr)
+                    if mode == "native-parent-focus":
+                        assert "synthetic_parent_focus_forwarded=true" in direct.stderr, direct.stderr
                 else:
                     assert direct.returncode != 0 and not published.exists(), (mode, direct.stdout, direct.stderr)
                     expected = "KONTAKT_LUA_UNAVAILABLE" if mode == "none" else "KONTAKT_EDITOR_UNSUPPORTED"
