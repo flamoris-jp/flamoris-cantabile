@@ -1201,7 +1201,7 @@
     },
     {
       "name": "vst_job_status",
-      "description": "Read a host-owned scan, script or multi-instrument job, including bounded rollback/audit failure summaries and immutable completed artifacts.",
+      "description": "Read a host-owned scan, script, capture or multi-instrument job, including bounded rollback/audit failure summaries and immutable completed artifacts.",
       "input_schema": {
         "type": "object",
         "properties": {
@@ -1257,7 +1257,7 @@
     },
     {
       "name": "vst_job_cancel",
-      "description": "Cancel a host-owned scan, script or multi-instrument job. An isolated worker's rollback is unknown after a hard kill.",
+      "description": "Cancel a host-owned scan, script, capture or multi-instrument job. An isolated worker's rollback is unknown after a hard kill.",
       "input_schema": {
         "type": "object",
         "properties": {
@@ -1498,6 +1498,69 @@
       }
     },
     {
+      "name": "instrument_state_import",
+      "description": "Import an operator-selected standard VST3 preset (base64, max 1 MiB) into one assigned track. Checks container/class and commits one native edit; resets stale sound/performance identity. Does not read arbitrary paths or certify sample availability.",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "input": {
+            "type": "object",
+            "properties": {
+              "track_id": {
+                "type": "string",
+                "maxLength": 128
+              },
+              "data_base64": {
+                "type": "string",
+                "maxLength": 1398104
+              }
+            },
+            "required": [
+              "track_id",
+              "data_base64"
+            ],
+            "additionalProperties": false
+          },
+          "guard": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "runtimeId": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 128
+              },
+              "documentToken": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 128
+              },
+              "expectedRevision": {
+                "type": "string",
+                "pattern": "^(0|[1-9][0-9]*)$",
+                "maxLength": 19
+              }
+            },
+            "required": [
+              "runtimeId",
+              "documentToken",
+              "expectedRevision"
+            ]
+          }
+        },
+        "additionalProperties": false,
+        "required": [
+          "input",
+          "guard"
+        ]
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "openWorldHint": false
+      }
+    },
+    {
       "name": "vst_script_begin",
       "description": "Start a bounded asynchronous write script on a track instance (or legacy configured instrument). Requires SCRIPT_WRITE opt-in. Poll vst_job_status for outputs or typed rollback/audit summary; use instrument_state_set to retain a saved state.",
       "input_schema": {
@@ -1563,6 +1626,83 @@
       "annotations": {
         "readOnlyHint": false,
         "destructiveHint": true,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "sound_performance_set",
+      "description": "Attach versioned, bounded performance declarations to a saved sound's expected state digest. MIDI numbers are 0..127; retain sources and operator evidence. Search returns the declarations; existing edit/Script tools execute documented controls. Matching capture artifact IDs may attach host-observed output evidence. This never infers anonymous automation meanings.",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "input": {
+            "type": "object",
+            "properties": {
+              "sound_id": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 128
+              },
+              "expected_sha256": {
+                "type": "string",
+                "minLength": 64,
+                "maxLength": 64
+              },
+              "performance": {
+                "type": "object"
+              },
+              "capture_midi_file_id": {
+                "type": "string",
+                "maxLength": 32
+              },
+              "capture_report_file_id": {
+                "type": "string",
+                "maxLength": 32
+              }
+            },
+            "required": [
+              "sound_id",
+              "expected_sha256",
+              "performance"
+            ],
+            "additionalProperties": false
+          },
+          "guard": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "runtimeId": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 128
+              },
+              "documentToken": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 128
+              },
+              "expectedRevision": {
+                "type": "string",
+                "pattern": "^(0|[1-9][0-9]*)$",
+                "maxLength": 19
+              }
+            },
+            "required": [
+              "runtimeId",
+              "documentToken",
+              "expectedRevision"
+            ]
+          }
+        },
+        "additionalProperties": false,
+        "required": [
+          "input",
+          "guard"
+        ]
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": false,
         "openWorldHint": false
       }
     },
@@ -1702,6 +1842,17 @@
                 "minLength": 1,
                 "maxLength": 128
               },
+              "control_kind": {
+                "type": "string",
+                "enum": [
+                  "trigger",
+                  "keyswitch",
+                  "pattern",
+                  "cc",
+                  "parameter",
+                  "gui"
+                ]
+              },
               "verification": {
                 "type": "string",
                 "enum": [
@@ -1709,7 +1860,8 @@
                   "state_captured",
                   "restored_audible",
                   "human_reviewed",
-                  "unverified"
+                  "unverified",
+                  "capture_observed"
                 ]
               },
               "offset": {
@@ -1996,6 +2148,221 @@
             "required": [
               "sound_id",
               "expected_sha256"
+            ],
+            "additionalProperties": false
+          },
+          "guard": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "runtimeId": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 128
+              },
+              "documentToken": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 128
+              },
+              "expectedRevision": {
+                "type": "string",
+                "pattern": "^(0|[1-9][0-9]*)$",
+                "maxLength": 19
+              }
+            },
+            "required": [
+              "runtimeId",
+              "documentToken",
+              "expectedRevision"
+            ]
+          }
+        },
+        "additionalProperties": false,
+        "required": [
+          "input",
+          "guard"
+        ]
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "vst_capture_begin",
+      "description": "Snapshot one assigned track, input MIDI and saved state for bounded asynchronous VST3 event-output capture. Does not edit or reinject into the project. Poll vst_job_status.",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "input": {
+            "type": "object",
+            "properties": {
+              "track_id": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 128
+              },
+              "start_tick": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 2147483647
+              },
+              "end_tick": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 2147483647
+              },
+              "max_events": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 8192
+              },
+              "max_seconds": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 600
+              }
+            },
+            "required": [
+              "track_id"
+            ],
+            "additionalProperties": false
+          },
+          "guard": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "runtimeId": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 128
+              },
+              "documentToken": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 128
+              },
+              "expectedRevision": {
+                "type": "string",
+                "pattern": "^(0|[1-9][0-9]*)$",
+                "maxLength": 19
+              }
+            },
+            "required": [
+              "runtimeId",
+              "documentToken",
+              "expectedRevision"
+            ]
+          }
+        },
+        "additionalProperties": false,
+        "required": [
+          "input",
+          "guard"
+        ]
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "vst_capture_preview",
+      "description": "Read capture status, provenance and up to 64 output events from matched immutable MIDI/report artifacts. Never changes the project.",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "input": {
+            "type": "object",
+            "properties": {
+              "midi_file_id": {
+                "type": "string",
+                "pattern": "^[a-f0-9]{32}$"
+              },
+              "report_file_id": {
+                "type": "string",
+                "pattern": "^[a-f0-9]{32}$"
+              }
+            },
+            "required": [
+              "midi_file_id",
+              "report_file_id"
+            ],
+            "additionalProperties": false
+          },
+          "guard": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "runtimeId": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 128
+              },
+              "documentToken": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 128
+              },
+              "expectedRevision": {
+                "type": "string",
+                "pattern": "^(0|[1-9][0-9]*)$",
+                "maxLength": 19
+              }
+            },
+            "required": [
+              "runtimeId",
+              "documentToken"
+            ]
+          }
+        },
+        "additionalProperties": false,
+        "required": [
+          "input"
+        ]
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "vst_capture_import",
+      "description": "Explicitly append captured MIDI to a new muted, unassigned native track. Validates artifact pairing and current tempo/meter/PPQ; preserves source/provenance with one Undo/Redo entry. Never overwrites a track.",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "input": {
+            "type": "object",
+            "properties": {
+              "midi_file_id": {
+                "type": "string",
+                "pattern": "^[a-f0-9]{32}$"
+              },
+              "report_file_id": {
+                "type": "string",
+                "pattern": "^[a-f0-9]{32}$"
+              },
+              "track_id": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 128
+              },
+              "name": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 128
+              }
+            },
+            "required": [
+              "midi_file_id",
+              "report_file_id",
+              "track_id",
+              "name"
             ],
             "additionalProperties": false
           },

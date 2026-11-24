@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.Text;
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using Flamoris.Mcp.Core;
 
 namespace Flamoris.Cantabile.Host;
@@ -84,7 +85,16 @@ internal sealed class WorkerFailure(string code, JsonElement summary) : Exceptio
                         audit.Add(new { index, op, status });
                 }
         }
-        return new(code, JsonSerializer.SerializeToElement(new { code, rollback = new { attempted, restored,
-            status = attempted == false ? "not_needed" : restored == true ? "restored" : restored == false ? "failed" : "unknown" }, audit }));
+        var summary = JsonSerializer.SerializeToNode(new { code, rollback = new { attempted, restored,
+            status = attempted == false ? "not_needed" : restored == true ? "restored" : restored == false ? "failed" : "unknown" }, audit })!.AsObject();
+        if (result.ValueKind == JsonValueKind.Object && result.TryGetProperty("error", out var failure) && failure.ValueKind == JsonValueKind.Object && failure.TryGetProperty("capture", out var capture) &&
+            capture.ValueKind == JsonValueKind.Object && capture.TryGetProperty("unsupported_event_types", out var types) && types.ValueKind == JsonValueKind.Array &&
+            capture.TryGetProperty("total_events", out var total) && total.ValueKind == JsonValueKind.Number && total.TryGetInt64(out long count) && count is >= 0 and <= 8193)
+        {
+            var safe = new JsonArray();
+            foreach (var type in types.EnumerateArray().Take(64)) if (type.ValueKind == JsonValueKind.Number && type.TryGetInt32(out int number) && number is >= 0 and <= 65535) safe.Add(number);
+            summary["capture"] = new JsonObject { ["unsupported_event_types"] = safe, ["total_events"] = count };
+        }
+        return new(code, JsonSerializer.SerializeToElement(summary));
     }
 }

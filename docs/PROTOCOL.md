@@ -246,3 +246,7 @@ part and 16 MiB total; the existing project budgets remain unchanged.
 The host resolves catalog IDs through its private registry and reports missing
 instruments by track without fallback. See [VST3 projects](VST3_PROJECTS.md) for
 host tools, job/result contracts, sound-state workflow, limits and acceptance.
+
+## Development capture append and performance declarations
+
+The typed `track.import_midi` edit accepts `track_id`, `name`, `data_base64`, and bounded version-1 `provenance` from matched host-owned capture artifacts. It reuses the SMF parser, requires matching PPQ and tempo/meter through the capture interval and all retained postroll events, rejects an existing destination, and appends muted raw channel events with regenerated IDs in one atomic history entry. A native `performance.validate` query validates the same closed metadata contract used by shelf records and optional catalog instrument `performance`. See [VST3_PERFORMANCE.md](VST3_PERFORMANCE.md) for full fields and projection limits. Old projects remain valid; update host and core together.

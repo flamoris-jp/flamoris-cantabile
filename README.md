@@ -25,6 +25,8 @@ durable individual states, category/role/tag search, isolated previews, and atom
 sound-to-track assignment with native Undo/Redo. State capture, restored audibility
 and human review remain separate evidence; commercial-instrument acceptance is pending.
 
+The development host also supports [VST3 output capture and sound-specific performance declarations](docs/VST3_PERFORMANCE.md): asynchronous MIDI capture, explicit append to a new native track, operator-selected standard preset ingress, and sourced MIDI/parameter declarations. SDK fixture acceptance is separate from commercial library and deployed Hub acceptance.
+
 Windows users can use the [GitHub CLI update launcher](audio/vst3/CantabileClient-Update.cmd)
 to fetch the latest successful main Windows build without manually downloading
 ZIPs. See [authentication, update selection and fallback behavior](audio/vst3/README.md#updating-on-windows-without-manually-downloading-zips).
