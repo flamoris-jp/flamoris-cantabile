@@ -229,7 +229,7 @@ performance declarations. Details and exact boundaries are in
 [VST3_PERFORMANCE.md](VST3_PERFORMANCE.md).
 
 Local Linux x64 verification: native/C++ and .NET Release builds passed with no
-.NET warnings/errors; CTest 1, native 33, host 27, audio 17 and packaging 10 tests
+.NET warnings/errors; CTest 1, native 34, host 27, audio 17 and packaging 10 tests
 passed. The actual 39-tool host catalog matches the generated Hub descriptor.
 All seven existing real SDK MDA Inspector/Script/render/MCP/band/shelf gates
 passed. The new original-fixture SDK capture gate passed, including timing,
@@ -242,3 +242,5 @@ catalog, commercial library controls/output, the original short composition and
 human listening remain separate workstation gates. Issues #8/#10/#12/#15 are
 not closed by this generic source acceptance. No private installed inventory,
 commercial state, audio, paths or live logs are included here.
+
+PR review also reproduced and fixed range-capture postroll timing: a delayed final note-off crossing a later tempo/meter change now retains the original song map, and native append rejects timing changes through the latest retained event. Both an actual SDK regression and an atomic native import regression fail before the fix and pass after it.

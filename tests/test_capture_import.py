@@ -72,5 +72,21 @@ class CaptureImportTests(unittest.TestCase):
         command["data_base64"]=base64.b64encode(smf([conductor,notes])).decode()
         result=self.call("edit.batch",mutate=True,commands=[command]); self.assertTrue(result["ok"],result)
 
+    def test_tempo_conflict_during_retained_postroll_is_atomic(self):
+        command=self.fixture(); p=self.call("project.get")["project"]
+        p["tracks"][0]["events"].append({"id":"later","kind":"meta","tick":500,"meta_type":81,"data":[15,66,64]})
+        self.assertTrue(self.call("project.load",mutate=True,data=p)["ok"])
+        conductor=meta(0,81,[7,161,32])+meta(500,81,[15,66,64])+meta(38,47,[])
+        notes=event(10,[0x90,72,100])+event(528,[0x80,72,0])+meta(0,47,[])
+        command["data_base64"]=base64.b64encode(smf([conductor,notes])).decode()
+        self.assertTrue(self.call("edit.batch",mutate=True,commands=[command])["ok"])
+        self.call("history.undo",mutate=True)
+        self.call("edit.batch",mutate=True,commands=[{"op":"event.update","track_id":"original","event_id":"later","patch":{"data":[11,113,176]}}])
+        before=self.call("project.get")
+        result=self.call("edit.batch",mutate=True,commands=[command])
+        self.assertFalse(result["ok"],result)
+        self.assertEqual(result["error"]["code"],"CAPTURE_TIMING_CONFLICT")
+        self.assertEqual(self.call("project.get"),before)
+
 
 if __name__=="__main__": unittest.main()

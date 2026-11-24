@@ -229,21 +229,11 @@ Score schedule(const fs::path& midi, int max_seconds, int capture_end = -1, bool
         if (exact_frame > static_cast<long double>(max_seconds) * sample_rate - tail_frames)
             fail("DURATION_LIMIT", "MIDI duration plus two-second tail exceeds max-seconds");
     };
-    for (const auto* event : events) {
-        auto tick = event->at("tick").get<std::int64_t>();
-        if (tick > last_tick) continue;
-        advance(tick);
-        auto frame = std::llround(exact_frame);
-        const auto& data = event->at("data");
-        if (event->at("kind") == "midi") {
-            auto status = event->at("status").get<int>();
-            if ((status & 0xf0) == 0xc0)
-                fail("UNSUPPORTED_MIDI", "Remove MIDI Program Change; select the sound with a VST preset");
-            score.messages.push_back({tick, frame, status, {data.at(0).get<int>(),
-                                      data.size() == 2 ? data.at(1).get<int>() : 0}});
-            continue;
-        }
-        if (event->at("meta_type") == 81) {
+    auto record_timing = [&](const json& event) {
+        const auto& data = event.at("data");
+        const auto tick = event.at("tick").get<std::int64_t>();
+        const auto frame = std::llround(exact_frame);
+        if (event.at("meta_type") == 81) {
             if (data.size() != 3) fail("INVALID_MIDI", "Invalid tempo event");
             active.tempo_us = (data[0].get<int>() << 16) | (data[1].get<int>() << 8) | data[2].get<int>();
             if (!active.tempo_us) fail("INVALID_MIDI", "Tempo must be positive");
@@ -258,12 +248,39 @@ Score schedule(const fs::path& midi, int max_seconds, int capture_end = -1, bool
         active.exact_frame = exact_frame;
         if (score.exact_timings.back().exact_frame == exact_frame) score.exact_timings.back() = active;
         else score.exact_timings.push_back(active);
-        auto meta = *event; meta.erase("id"); score.conductor.push_back(std::move(meta));
+        auto meta = event; meta.erase("id"); score.conductor.push_back(std::move(meta));
         if (score.timings.back().frame == frame) score.timings.back() = active;
         else score.timings.push_back(active);
+    };
+    for (const auto* event : events) {
+        auto tick = event->at("tick").get<std::int64_t>();
+        if (tick > last_tick) continue;
+        advance(tick);
+        auto frame = std::llround(exact_frame);
+        const auto& data = event->at("data");
+        if (event->at("kind") == "midi") {
+            auto status = event->at("status").get<int>();
+            if ((status & 0xf0) == 0xc0)
+                fail("UNSUPPORTED_MIDI", "Remove MIDI Program Change; select the sound with a VST preset");
+            score.messages.push_back({tick, frame, status, {data.at(0).get<int>(),
+                                      data.size() == 2 ? data.at(1).get<int>() : 0}});
+            continue;
+        }
+        record_timing(*event);
     }
     advance(last_tick);
     score.frames = static_cast<std::int64_t>(std::ceil(exact_frame)) + tail_frames;
+    // Range capture stops new input at end_tick, but generated endings still
+    // live on the original song's tempo/meter map throughout bounded postroll.
+    if (capture_end >= 0) for (const auto* event : events) {
+        const auto tick = event->at("tick").get<std::int64_t>();
+        if (tick <= last_tick || event->at("kind") != "meta") continue;
+        const auto future = exact_frame + static_cast<long double>(tick - previous_tick) * active.tempo_us *
+                            sample_rate / (1000000.L * score.ppq);
+        if (future >= score.frames) break;
+        exact_frame = future; previous_tick = tick;
+        record_timing(*event);
+    }
     return score;
 }
 

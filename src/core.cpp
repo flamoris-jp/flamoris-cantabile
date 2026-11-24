@@ -241,16 +241,18 @@ void apply_command(json& project, const json& command) {
         json imported;
         try { imported = cantabile::import_midi(cantabile::base64_decode(string_field(command, "data_base64", 1398104))); }
         catch (const std::exception& e) { throw Error("INVALID_MIDI", e.what()); }
-        require(imported["ppq"] == project["ppq"] && time_map(imported, provenance["end_tick"]) == time_map(project, provenance["end_tick"]),
-            "Capture timing differs from the current project", "CAPTURE_TIMING_CONFLICT");
         require(imported["tracks"].size() == 2, "Capture must contain conductor and output tracks");
         json events = json::array();
+        auto timing_end = provenance["end_tick"].get<std::int64_t>();
         for (const auto& track : imported["tracks"]) for (auto e : track["events"]) {
             if (e["kind"] == "meta") continue;
             require(e["kind"] == "midi", "Unsupported capture data");
+            timing_end = std::max(timing_end, e.at("tick").get<std::int64_t>());
             e.erase("id"); events.push_back(std::move(e));
         }
         require(!events.empty(), "Capture contains no events", "CAPTURE_EMPTY");
+        require(imported["ppq"] == project["ppq"] && time_map(imported, timing_end) == time_map(project, timing_end),
+            "Capture timing differs from the current project", "CAPTURE_TIMING_CONFLICT");
         project["smf_format"] = 1;
         project["tracks"].push_back({{"id", id}, {"name", string_field(command, "name", 128)},
             {"channel", 0}, {"muted", true}, {"events", events}, {"end_tick", imported["tracks"][1]["end_tick"]}, {"provenance", provenance}});

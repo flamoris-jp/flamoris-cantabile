@@ -80,7 +80,7 @@ public:
                 e.noteOff.pitch = static_cast<int16>(std::min(127, pitch + transpose));
                 if (!ids[key].empty()) { e.noteOff.noteId = ids[key].front(); ids[key].erase(ids[key].begin()); }
             }
-            pending.push_back({e, origin + e.sampleOffset + 17});
+            pending.push_back({e, origin + e.sampleOffset + (off && pitch == 55 ? 4800 : 17)});
         }
         std::stable_sort(pending.begin(), pending.end(), [](const auto& a,const auto& b){ return a.frame < b.frame; });
         for (auto it = pending.begin(); it != pending.end();) {

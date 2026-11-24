@@ -92,6 +92,21 @@ def main():
             ranged = capture(start_tick=200, end_tick=800)
             ranged_report = json.loads(client.download(ranged["report"]["file_id"], chunk=131072))
             assert ranged_report["discarded_before_range"] == 2 and ranged_report["unmatched_note_offs"] == 1, ranged_report
+            # Delayed note termination crosses a tempo/meter change after the
+            # requested end. Keep the real song map through that termination.
+            client.tool("project_load", {"discard_unsaved":True,"data":{"schema_version":1,"ppq":480,"tracks":[
+                {"id":"time","events":[{"id":"tempo0","kind":"meta","tick":0,"meta_type":81,"data":[7,161,32]},
+                    {"id":"later","kind":"meta","tick":500,"meta_type":81,"data":[15,66,64]},
+                    {"id":"meter","kind":"meta","tick":500,"meta_type":88,"data":[5,2,24,8]}]},
+                {"id":"source","end_tick":960,"events":[{"kind":"note","tick":10,"duration":470,"pitch":55,"velocity":99}]}]}})
+            client.tool("instrument_assign", {"track_id":"source","catalog_id":identity})
+            tail = capture(end_tick=480)
+            tail_report = json.loads(client.download(tail["report"]["file_id"],chunk=131072))
+            assert tail_report["events"][-1]["sample_frame"] == 28800, tail_report
+            assert tail_report["events"][-1]["tick"] == 538, tail_report
+            client.tool("vst_capture_import", {**pair(tail),"track_id":"tail","name":"Delayed ending"})
+            client.tool("edit_batch", {"commands":[{"op":"event.update","track_id":"time","event_id":"later","patch":{"data":[11,113,176]}}]})
+            failure("vst_capture_import", {**pair(tail),"track_id":"changedtail","name":"Changed tail"},"CAPTURE_TIMING_CONFLICT")
             # Failed/empty jobs cannot publish a partial successful note capture.
             for pitch, code in ((61,"UNSUPPORTED_OUTPUT_EVENT"),(62,"MIDI_OUTPUT_LIMIT"),(63,"INVALID_OUTPUT_EVENT"),(65,"vst_worker_crashed"),(67,"INVALID_OUTPUT_EVENT")):
                 load(pitch)

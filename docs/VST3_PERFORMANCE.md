@@ -52,7 +52,9 @@ is not used as the time authority. Tempo integration uses extended precision;
 sample timestamps map to the nearest integer tick, with positive half ties up.
 Input scheduling has the renderer's existing sample rounding. No audio-latency
 offset is subtracted from event time. The SMF retains song-origin rests and the
-same conductor tempo/meter events through the capture interval.
+same conductor tempo/meter events through the capture interval and bounded
+postroll. Future timing changes are retained even though new input stops at
+the requested end, so a delayed final note-off stays on the original song map.
 
 Silent processing preroll runs with transport stopped; its events are counted
 and discarded. Processing before `start_tick` runs from song zero so stateful
@@ -83,7 +85,8 @@ Note On `length` does not synthesize an end: the SDK requires a following off.
 The report's conversion section makes these losses explicit.
 
 Import reuses the native SMF parser in the typed `track.import_midi` edit.
-It validates PPQ and the current tempo/meter map through the captured interval,
+It validates PPQ and the current tempo/meter map through the requested interval
+and the latest retained event (including postroll note-offs),
 rejects an existing destination, regenerates stable event IDs and preserves the
 input tracks. A fresh guard alone cannot override a timing mismatch. Later
 ordinary MIDI edits operate on the appended raw channel events. Muted/unassigned
@@ -211,7 +214,8 @@ composition engine or an executor for arbitrary instructions.
 `capture_smoke.py WORKER FIXTURE_MODULE CORE_LIBRARY MDA_MODULE` exercises actual
 SDK callbacks using the repository's original `capture_fixture.cpp`. It covers
 sub-block offsets/block crossing, tempo/meter changes, overlap/note IDs, pressure,
-range filtering/postroll endings, empty output, unsupported/tuned/invalid output,
+range filtering/postroll endings across future tempo/meter changes and stale-tail
+timing conflicts, empty output, unsupported/tuned/invalid output,
 limits, crash/cancellation, immutable input while editing, paired artifact
 retrieval/restart, native append/history/timing conflicts, changed-state ingress,
 new-session recall and declarations. The existing real MDA band/shelf gates
