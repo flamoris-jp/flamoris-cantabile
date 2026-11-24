@@ -95,6 +95,15 @@ jobs:
           $mda = (Resolve-Path build-vst/VST3/Release/mda-vst3.vst3).Path
           python audio/vst3/tests/capture_smoke.py $worker $fixture $core $mda
           if ($LASTEXITCODE) { exit $LASTEXITCODE }
+      - name: Synthetic Kontakt editor preparation and state handoff
+        # Original SDK/Win32 fixture only. This is not vendor Lua acceptance.
+        shell: pwsh
+        run: |
+          $worker = (Resolve-Path build-vst/audio/vst3/Release/cantabile-client.exe).Path
+          $core = (Resolve-Path build-vst/Release/cantabile_core.dll).Path
+          $fixture = (Resolve-Path build-vst/VST3/Release/cantabile-kontakt-editor-fixture.vst3).Path
+          python audio/vst3/tests/kontakt_prepare_smoke.py $worker $fixture $core
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
       - name: Prepare portable preview
         shell: pwsh
         run: |
@@ -112,6 +121,7 @@ jobs:
           Copy-Item docs/VST3_PROJECTS.md client-package/docs/VST3_PROJECTS.md
           Copy-Item docs/SOUND_SHELF.md client-package/docs/SOUND_SHELF.md
           Copy-Item docs/VST3_PERFORMANCE.md client-package/docs/VST3_PERFORMANCE.md
+          Copy-Item docs/KONTAKT_PREPARATION.md client-package/docs/KONTAKT_PREPARATION.md
           Copy-Item "$env:RUNNER_TEMP/vst3sdk/LICENSE.txt" client-package/VST3-SDK-LICENSE.txt
           Copy-Item "$env:RUNNER_TEMP/vst3sdk/base/LICENSE.txt" client-package/VST3-base-LICENSE.txt
           Copy-Item "$env:RUNNER_TEMP/vst3sdk/public.sdk/LICENSE.txt" client-package/VST3-public-sdk-LICENSE.txt
