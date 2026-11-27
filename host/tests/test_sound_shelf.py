@@ -49,7 +49,11 @@ else:
     data = struct.pack('<200f',*([value]*200))
     output = pathlib.Path(args[args.index('--output')+1])
     output.write_bytes(struct.pack('<4sI4s4sIHHIIHH4sI',b'RIFF',36+len(data),b'WAVE',b'fmt ',16,3,2,48000,384000,8,32,b'data',len(data))+data)
-    print(json.dumps({'ok':True,'backend':'vst3','sample_format':'ieee_float32le'}))
+    result = json.dumps({'ok':True,'backend':'vst3','sample_format':'ieee_float32le'})
+    if '--result-json' in args:
+        pathlib.Path(args[args.index('--result-json')+1]).write_text(result)
+        print('private-vendor-stdout')
+    else: print(result)
 '''
 
 
@@ -172,6 +176,7 @@ class SoundShelfTests(unittest.TestCase):
                                     expected='completed' if succeeds else 'failed')
                 self.assertEqual(self.project(), before)
                 self.assertNotIn('private-diagnostic-', json.dumps(preview))
+                self.assertNotIn('private-vendor-stdout', json.dumps(preview))
                 self.assertNotIn(str(self.root), json.dumps(preview))
                 if succeeds:
                     self.assertGreater(preview['result']['render']['audio']['peak'], 0)
@@ -188,6 +193,34 @@ class SoundShelfTests(unittest.TestCase):
                     self.assertGreater(error['output_limit']['observed_characters'], maximum)
                     self.assertIn('host_kill_requested', error['termination'])
                     self.assertEqual(self.client.tool('file_list', {}, guard=False), files)
+
+    def test_kontakt_result_file_is_required_and_validated_before_publication(self):
+        source = WORKER.replace("'name':'Test keys','vendor':'Fixture'",
+                                "'name':'Kontakt 8','vendor':'Native Instruments'")
+        self.worker.write_text(f'#!{sys.executable}\n' + source)
+        self.wait(self.client.tool('vst_scan', {}))
+        sound = self.register()
+        before = self.project()
+        files = self.client.tool('file_list', {}, guard=False)
+        original = "pathlib.Path(args[args.index('--result-json')+1]).write_text(result)"
+        for operation, kind in [
+            ("pass", "unavailable_result"),
+            ("pathlib.Path(args[args.index('--result-json')+1]).write_text('private-invalid')", "invalid_json"),
+            ("pathlib.Path(args[args.index('--result-json')+1]).write_text('x' * 16385)", "unavailable_result"),
+            ("pathlib.Path(args[args.index('--result-json')+1]).symlink_to('0.mid')", "unavailable_result"),
+        ]:
+            with self.subTest(kind=kind, operation=operation):
+                self.worker.write_text(f'#!{sys.executable}\n' + source.replace(original, operation))
+                status = self.wait(self.client.tool('sound_preview', {'sound_id':sound['sound_id'], 'phrase':'melody'}), 'failed')
+                error = status['error']
+                self.assertEqual(error['code'], 'vst_worker_crashed')
+                self.assertEqual(error['result_channel']['source'], 'file')
+                self.assertEqual(error['result_channel']['kind'], kind)
+                self.assertEqual(error['result_channel']['exit_code'], 0)
+                self.assertNotIn('private-', json.dumps(status))
+                self.assertNotIn(str(self.root), json.dumps(status))
+                self.assertEqual(self.client.tool('file_list', {}, guard=False), files)
+                self.assertEqual(self.project(), before)
 
     def test_validation_missing_version_corruption_and_guard_are_atomic(self):
         a = self.register(); before=self.project()

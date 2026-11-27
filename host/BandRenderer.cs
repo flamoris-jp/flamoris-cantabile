@@ -35,7 +35,7 @@ public sealed class BandRenderer(Workspace workspace, VstCatalog catalog)
     {
         var summary = JsonSerializer.SerializeToNode(new { code, track_id = track,
             rollback = new { attempted = (bool?)null, restored = (bool?)null, status = "unknown" } })!.AsObject();
-        // Keep host-created overflow counters, never vendor output or paths.
+        // Keep host-created channel diagnostics, never vendor output or paths.
         if (source is { Code: "vst_output_limit" or "vst_worker_crashed" })
             foreach (string name in new[] { "output_limit", "termination", "result_channel" })
                 if (source.Summary.TryGetProperty(name, out var value))
@@ -68,11 +68,14 @@ public sealed class BandRenderer(Workspace workspace, VstCatalog catalog)
                 arguments.AddRange(["--preroll-ms", part.PrerollMs.ToString(System.Globalization.CultureInfo.InvariantCulture)]);
                 try
                 {
-                    int stderrMaximum = part.Instrument.Vendor == "Native Instruments" &&
-                        (part.Instrument.Name is "Kontakt 7" or "Kontakt 8") ? 1024 * 1024 : 16384;
+                    bool kontakt = part.Instrument.Vendor == "Native Instruments" &&
+                        (part.Instrument.Name is "Kontakt 7" or "Kontakt 8");
+                    string resultPath = Path.Combine(sandbox, $"{i}.result.json");
+                    if (kontakt) arguments.AddRange(["--result-json", resultPath]);
+                    Func<byte[]>? resultReader = kontakt ? () => Workspace.ReadBounded(resultPath, 16384) : null;
                     var result = await WorkerProcess.Run(worker!, arguments, sandbox,
                         TimeSpan.FromSeconds(maximumSeconds + 30) + TimeSpan.FromMilliseconds(partWarmup + part.PrerollMs),
-                        token, stderrMaximum: stderrMaximum);
+                        token, stderrMaximum: kontakt ? 1024 * 1024 : 16384, resultReader: resultReader);
                     if (result.GetProperty("backend").GetString() != "vst3" || result.GetProperty("sample_format").GetString() != "ieee_float32le") throw new McpFault("invalid_audio");
                     Workspace.DemandRegular(output);
                     long size = new FileInfo(output).Length;

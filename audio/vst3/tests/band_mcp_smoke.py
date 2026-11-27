@@ -5,6 +5,7 @@ import json
 import os
 from pathlib import Path
 import struct
+import subprocess
 import sys
 import tempfile
 import time
@@ -34,6 +35,27 @@ def main():
         os.environ.pop(name, None)
     test_host.RENDERER, test_host.CORE = Path(worker), Path(core)
     with tempfile.TemporaryDirectory() as directory:
+        # Explicit native render channel: original generated MIDI + public SDK
+        # instrument, with no commercial state or workstation paths in source.
+        root = Path(directory)
+        midi, audio, result_file = root / "channel.mid", root / "channel.wav", root / "result-音色.json"
+        midi.write_bytes(bytes.fromhex("4d546864000000060000000101e04d54726b0000000d00903c648360803c0000ff2f00"))
+        listed = subprocess.run([worker, "list", "--plugin", plugin], capture_output=True, timeout=30, check=True)
+        piano = next(c["id"] for c in json.loads(listed.stdout)["classes"] if c["name"] == "mda Piano")
+        command = [worker, "--plugin", plugin, "--class-id", piano, "--midi", str(midi), "--output", str(audio),
+                   "--max-seconds", "10", "--float-output", "--result-json", str(result_file)]
+        completed = subprocess.run(command, capture_output=True, timeout=30)
+        assert completed.returncode == 0, completed.returncode
+        result_bytes = result_file.read_bytes()
+        result = json.loads(result_bytes)
+        assert result["ok"] and result["backend"] == "vst3" and result["sample_format"] == "ieee_float32le", result
+        assert audio.read_bytes()[:4] == b"RIFF" and not Path(str(result_file) + ".part").exists()
+        completed = subprocess.run(command, capture_output=True, timeout=30)
+        assert completed.returncode != 0 and result_file.read_bytes() == result_bytes, "existing result overwritten"
+        result_file.unlink(); audio.unlink(); midi.unlink()
+        completed = subprocess.run(command, capture_output=True, timeout=30)
+        assert completed.returncode != 0 and json.loads(result_file.read_bytes())["ok"] is False
+        assert not audio.exists() and not Path(str(result_file) + ".part").exists()
         client = test_host.Client(directory)
         try:
             scan = client.tool("vst_scan", {})
@@ -136,3 +158,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+

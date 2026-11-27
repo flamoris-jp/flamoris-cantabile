@@ -9,7 +9,7 @@ namespace Flamoris.Cantabile.Host;
 // One bounded process per plugin operation. Raw stdout/stderr never reaches MCP.
 internal static class WorkerProcess
 {
-    private readonly record struct ReadResult(string Text, int Characters);
+    private readonly record struct ReadResult(string Text, int Characters, bool StartsWithObject);
     private sealed class OutputLimit(string stream, int maximum, int observed) : Exception
     {
         public string Stream { get; } = stream;
@@ -17,7 +17,7 @@ internal static class WorkerProcess
         public int Observed { get; } = observed;
     }
     public static async Task<JsonElement> Run(string executable, IEnumerable<string> arguments, string directory,
-        TimeSpan timeout, CancellationToken token, int stdoutMaximum = 4 * 1024 * 1024, int stderrMaximum = 16384)
+        TimeSpan timeout, CancellationToken token, int stdoutMaximum = 4 * 1024 * 1024, int stderrMaximum = 16384, Func<byte[]>? resultReader = null)
     {
         using var lifetime = CancellationTokenSource.CreateLinkedTokenSource(token);
         lifetime.CancelAfter(timeout);
@@ -27,7 +27,7 @@ internal static class WorkerProcess
         foreach (var argument in arguments) process.StartInfo.ArgumentList.Add(argument);
         SafeEnvironment(process.StartInfo);
         if (!process.Start()) throw new McpFault("vst_start_failed");
-        Task<ReadResult> output = Read(process.StandardOutput, "stdout", stdoutMaximum, lifetime.Token);
+        Task<ReadResult> output = Read(process.StandardOutput, "stdout", stdoutMaximum, lifetime.Token, keepText: resultReader is null);
         Task<ReadResult> errors = Read(process.StandardError, "stderr", stderrMaximum, lifetime.Token, keepText: false);
         try
         {
@@ -58,17 +58,33 @@ internal static class WorkerProcess
         }
         JsonElement result;
         var stdout = await output; var stderr = await errors;
-        try { using var json = JsonDocument.Parse(stdout.Text, new() { MaxDepth = 32 }); result = json.RootElement.Clone(); }
-        catch (JsonException)
+        int? resultBytes = null;
+        string channelKind = "invalid_json";
+        try
         {
-            // The historical code includes empty/malformed stdout, not only a
-            // native crash. Report channel shape and exit status without text.
+            if (resultReader is null)
+            {
+                using var json = JsonDocument.Parse(stdout.Text, new() { MaxDepth = 32 }); result = json.RootElement.Clone();
+            }
+            else
+            {
+                channelKind = "unavailable_result";
+                byte[] bytes = resultReader(); resultBytes = bytes.Length;
+                channelKind = "result_too_large";
+                if (bytes.Length > 16384) throw new InvalidDataException();
+                channelKind = "invalid_json";
+                using var json = JsonDocument.Parse(bytes, new() { MaxDepth = 32 }); result = json.RootElement.Clone();
+            }
+        }
+        catch (Exception error) when (error is JsonException or IOException or InvalidDataException or UnauthorizedAccessException or McpFault)
+        {
+            // Neither vendor output nor file paths belong in MCP diagnostics.
             throw new WorkerFailure("vst_worker_crashed", JsonSerializer.SerializeToElement(new {
                 code = "vst_worker_crashed",
-                result_channel = new { kind = "invalid_json", exit_code = process.ExitCode,
+                result_channel = new { kind = channelKind, source = resultReader is null ? "stdout" : "file",
+                    result_bytes = resultBytes, exit_code = process.ExitCode,
                     stdout_characters = stdout.Characters, stderr_characters = stderr.Characters,
-                    stdout_empty = stdout.Characters == 0,
-                    stdout_starts_with_object = stdout.Text.AsSpan().TrimStart().StartsWith("{", StringComparison.Ordinal) },
+                    stdout_empty = stdout.Characters == 0, stdout_starts_with_object = stdout.StartsWithObject },
                 rollback = new { attempted = (bool?)null, restored = (bool?)null, status = "unknown" }
             }));
         }
@@ -87,14 +103,16 @@ internal static class WorkerProcess
     private static async Task<ReadResult> Read(StreamReader stream, string name, int maximum, CancellationToken token, bool keepText = true)
     {
         var text = keepText ? new StringBuilder() : null;
-        var buffer = new char[4096]; int count, observed = 0;
+        var buffer = new char[4096]; int count, observed = 0; char? first = null;
         while ((count = await stream.ReadAsync(buffer.AsMemory(), token)) > 0)
         {
             observed += count;
             if (observed > maximum) throw new OutputLimit(name, maximum, observed);
+            if (first is null)
+                for (int i = 0; i < count; ++i) if (!char.IsWhiteSpace(buffer[i])) { first = buffer[i]; break; }
             text?.Append(buffer, 0, count);
         }
-        return new(text?.ToString() ?? string.Empty, observed);
+        return new(text?.ToString() ?? string.Empty, observed, first == '{');
     }
 }
 

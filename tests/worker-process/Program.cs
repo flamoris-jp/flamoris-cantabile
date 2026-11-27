@@ -15,6 +15,14 @@ internal static class Program
         if (args[0] == "--child")
         {
             string mode = args[1];
+            if (mode.StartsWith("file-", StringComparison.Ordinal))
+            {
+                Console.Write(PrivateText + "{\"ok\":true}");
+                if (mode != "file-missing")
+                    File.WriteAllText(args[2], mode == "file-invalid" ? PrivateText : mode == "file-large" ? new string('x', 16385)
+                        : mode == "file-failure" ? "{\"ok\":false,\"error\":{\"code\":\"KONTAKT_LOAD_FAILED\"}}" : "{\"ok\":true}");
+                return mode == "file-exit" ? 17 : 0;
+            }
             if (mode == "crash") return 17;
             if (mode == "malformed-success") { Console.Write(PrivateText + "{\"ok\":true}"); return 0; }
             if (mode == "malformed-object") { Console.Write("  {" + PrivateText); return 0; }
@@ -106,7 +114,38 @@ internal static class Program
                 Check(!failure.Summary.GetRawText().Contains(PrivateText, StringComparison.Ordinal), "result channel privacy");
             }
         }
-        Console.WriteLine("PASS: default/Kontakt bounds, diagnostics, malformed results, exit codes, privacy, timeout and cancellation");
+        string resultDirectory = Path.Combine(Path.GetTempPath(), "cantabile-result-test-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(resultDirectory);
+        try
+        {
+            foreach (string mode in new[] { "file-success", "file-missing", "file-invalid", "file-large", "file-failure", "file-exit", "stdout-overflow" })
+            {
+                string path = Path.Combine(resultDirectory, mode + ".json");
+                try
+                {
+                    var result = await WorkerProcess.Run(executable, [assembly, "--child", mode, path], Environment.CurrentDirectory,
+                        TimeSpan.FromSeconds(15), default, Maximum, Maximum, resultReader: () => File.ReadAllBytes(path));
+                    Check(mode == "file-success" && result.GetProperty("ok").GetBoolean(), "only valid successful file accepted");
+                }
+                catch (WorkerFailure failure)
+                {
+                    Check(mode != "file-success", "noisy stdout must not mask result file");
+                    Check(!failure.Summary.GetRawText().Contains(PrivateText, StringComparison.Ordinal), "result file text privacy");
+                    Check(!failure.Summary.GetRawText().Contains(path, StringComparison.Ordinal), "result file path privacy");
+                    if (mode is "file-missing" or "file-invalid" or "file-large")
+                    {
+                        var channel = failure.Summary.GetProperty("result_channel");
+                        Check(channel.GetProperty("source").GetString() == "file", "file channel identity");
+                        Check(channel.GetProperty("kind").GetString() == (mode == "file-missing" ? "unavailable_result" : mode == "file-large" ? "result_too_large" : "invalid_json"), "file failure kind");
+                        Check(channel.GetProperty("exit_code").GetInt32() == 0, "successful exit alone is insufficient");
+                        Check(!channel.GetProperty("stdout_starts_with_object").GetBoolean(), "discarded output prefix still classified");
+                    }
+                    else Check(failure.Code == (mode == "file-failure" ? "KONTAKT_LOAD_FAILED" : mode == "stdout-overflow" ? "vst_output_limit" : "vst_worker_failed"), "file mode preserves failure and output limits");
+                }
+            }
+        }
+        finally { Directory.Delete(resultDirectory, recursive: true); }
+        Console.WriteLine("PASS: default/Kontakt bounds, diagnostics, malformed results, dedicated files, exit codes, privacy, timeout and cancellation");
         return 0;
     }
     private static void Check(bool condition, string message)
