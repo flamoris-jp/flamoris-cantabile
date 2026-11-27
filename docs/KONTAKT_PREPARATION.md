@@ -143,8 +143,10 @@ CLI must also be supervised because a vendor modal UI can block its calling thre
 Kontakt preparation keeps the result-JSON stdout bound at 16,384 characters and
 allows up to 1,048,576 diagnostic stderr characters. Stderr is continuously
 drained and counted with a fixed 4,096-character buffer, without retaining its
-text. Other worker operations retain their existing 16,384-character stderr
-bound; only this adapter requests the larger budget. More diagnostic text does
+text. Catalog-backed rendering (including sound previews) uses the same larger
+stderr budget only for catalog entries with vendor `Native Instruments` and
+name `Kontakt 7` or `Kontakt 8`; other entries and worker operations retain their
+existing 16,384-character stderr bound. More diagnostic text does
 not imply success: valid stdout, a successful exit, receipt/state validation and
 publication are still required. Exceeding either hard bound still kills the
 worker; timeout/cancellation and the 1 MiB state-file limit are unchanged.
@@ -152,7 +154,8 @@ The failure now includes `output_limit.stream`, `maximum_characters` and
 `observed_characters` (the count at the first overflowing read, not a total), plus
 `termination.exited_before_cleanup`, `host_kill_requested` and the exit code after
 cleanup. These are host-created counters/flags only; no vendor text or paths are
-returned or retained. A requested host kill explains an owned window disappearing
+returned or retained. Catalog render failures also preserve these counters and
+cleanup flags alongside the failing track ID. A requested host kill explains an owned window disappearing
 but does not establish a vendor crash. `state_captured` records completion of the
 in-memory standard state request, before file publication and host validation;
 it does not certify a successful artifact or audible recall.

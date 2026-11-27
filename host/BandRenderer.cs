@@ -31,8 +31,17 @@ public sealed class BandRenderer(Workspace workspace, VstCatalog catalog)
         return parts;
     }
     internal static byte[]? State(JsonElement instrument) => instrument.TryGetProperty("state_base64", out var s) ? Convert.FromBase64String(s.GetString()!) : null;
-    private static WorkerFailure TrackFailure(string code, string track) => new(code, JsonSerializer.SerializeToElement(new { code, track_id = track,
-        rollback = new { attempted = (bool?)null, restored = (bool?)null, status = "unknown" } }));
+    private static WorkerFailure TrackFailure(string code, string track, WorkerFailure? source = null)
+    {
+        var summary = JsonSerializer.SerializeToNode(new { code, track_id = track,
+            rollback = new { attempted = (bool?)null, restored = (bool?)null, status = "unknown" } })!.AsObject();
+        // Keep host-created overflow counters, never vendor output or paths.
+        if (source is { Code: "vst_output_limit" })
+            foreach (string name in new[] { "output_limit", "termination" })
+                if (source.Summary.TryGetProperty(name, out var value))
+                    summary[name] = System.Text.Json.Nodes.JsonNode.Parse(value.GetRawText());
+        return new(code, JsonSerializer.SerializeToElement(summary));
+    }
     internal async Task<JsonElement> Run(Part[] parts, long revision, int maximumSeconds, Action<int, int> progress, CancellationToken token)
     {
         string sandbox = workspace.CreateVstSandbox(); var pending = new List<string>();
@@ -59,7 +68,11 @@ public sealed class BandRenderer(Workspace workspace, VstCatalog catalog)
                 arguments.AddRange(["--preroll-ms", part.PrerollMs.ToString(System.Globalization.CultureInfo.InvariantCulture)]);
                 try
                 {
-                    var result = await WorkerProcess.Run(worker!, arguments, sandbox, TimeSpan.FromSeconds(maximumSeconds + 30) + TimeSpan.FromMilliseconds(partWarmup + part.PrerollMs), token);
+                    int stderrMaximum = part.Instrument.Vendor == "Native Instruments" &&
+                        (part.Instrument.Name is "Kontakt 7" or "Kontakt 8") ? 1024 * 1024 : 16384;
+                    var result = await WorkerProcess.Run(worker!, arguments, sandbox,
+                        TimeSpan.FromSeconds(maximumSeconds + 30) + TimeSpan.FromMilliseconds(partWarmup + part.PrerollMs),
+                        token, stderrMaximum: stderrMaximum);
                     if (result.GetProperty("backend").GetString() != "vst3" || result.GetProperty("sample_format").GetString() != "ieee_float32le") throw new McpFault("invalid_audio");
                     Workspace.DemandRegular(output);
                     long size = new FileInfo(output).Length;
@@ -68,7 +81,7 @@ public sealed class BandRenderer(Workspace workspace, VstCatalog catalog)
                     if ((size - 44) * (2L * parts.Length + 1) + 44L * (parts.Length + 1) > Workspace.MaximumTotalArtifactBytes) throw new McpFault("workspace_quota");
                 }
                 catch (OperationCanceledException) { throw; }
-                catch (Exception e) { throw TrackFailure(e is WorkerFailure f ? f.Code : e is McpFault m ? m.Code : "render_failed", part.TrackId); }
+                catch (Exception e) { throw TrackFailure(e is WorkerFailure f ? f.Code : e is McpFault m ? m.Code : "render_failed", part.TrackId, e as WorkerFailure); }
                 sources.Add(output); progress(i + 1, parts.Length + 1);
             }
             foreach (var _ in parts) pending.Add(workspace.TempFile(".wav"));
