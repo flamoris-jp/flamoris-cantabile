@@ -93,7 +93,8 @@ def main():
         config = root / "libraries.json"
         config.write_text(json.dumps({"version": 1, "libraries": [{"id": "original", "name": "Synthetic", "root": str(library)}]}))
         os.environ.update(CANTABILE_KONTAKT_LIBRARIES=str(config), CANTABILE_KONTAKT_PREPARE="true",
-                          CANTABILE_VST3_PATHS=fixture, CANTABILE_FIXTURE_KONTAKT_KEYS="native-focus")
+                          CANTABILE_VST3_PATHS=fixture, CANTABILE_FIXTURE_KONTAKT_KEYS="native-focus",
+                          CANTABILE_KONTAKT_DIALOG_WAIT_SECONDS="30")
         client = test_host.Client(root / "workspace")
         try:
             scan = wait(client, client.tool("vst_scan", {}))
@@ -125,6 +126,7 @@ def main():
             assert job["state"] == "completed", job
             result = job["result"]
             assert result["state_captured"] and not result["audible_verified"] and not result["project_changed"]
+            assert result["dialog_wait_seconds"] == 30, result
             assert client.tool("project_get", {}) == before
             state = client.download(result["artifact"]["file_id"], chunk=128000)
             assert state[:4] == b"VST3"
@@ -157,6 +159,7 @@ def main():
             files = client.tool("file_list", {})
             failure = wait(client, client.tool("kontakt_prepare_begin", dict(request, instrument_id=failed["content_id"])))
             assert failure["state"] == "failed" and failure["error"]["code"] == "KONTAKT_LOAD_FAILED", failure
+            assert failure["error"]["dialog_wait_seconds"] == 30, failure
             assert client.tool("file_list", {}) == files
             assert client.tool("project_get", {}) == before
             pending = client.tool("kontakt_prepare_begin", request)
@@ -168,21 +171,28 @@ def main():
             # SDK-only, SDK returning false after opening, absent/ambiguous
             # native children, and an editor that handles neither route.
             # Every attempt is a fresh subprocess with a bounded deadline.
-            for mode in ("sdk", "sdk-focus", "sdk-false", "native", "native-nested-focus", "native-parent-focus", "missing", "ambiguous", "none"):
-                attempt = root / ("keys-" + mode)
+            cases = [(mode, None) for mode in ("sdk", "sdk-focus", "sdk-false", "native", "native-nested-focus", "native-parent-focus", "missing", "ambiguous")]
+            cases += [("sdk", 90), ("sdk-delayed", 30), ("none", 1)]
+            for mode, dialog_wait in cases:
+                attempt = root / ("keys-" + mode + "-" + str(dialog_wait))
                 attempt.mkdir()
                 (attempt / "prepare.json").write_text(json.dumps(dict(version=1, nonce="e"*32,
                     instrument=str(library / "Original '声' [1].nki"), snapshot=None)))
+                began = time.monotonic()
                 direct = subprocess.run([worker, "kontakt-prepare", "--plugin", fixture,
                     "--class-id", target["class_id"], "--script", str(attempt / "prepare.json"),
                     "--workspace", str(attempt), "--output", str(attempt / "prepared.vstpreset"),
-                    "--max-seconds", "30", "--allow-write"], cwd=attempt, capture_output=True,
-                    text=True, timeout=35, env=dict(os.environ, CANTABILE_FIXTURE_KONTAKT_KEYS=mode))
+                    "--max-seconds", "40", "--allow-write"] +
+                    (["--dialog-wait-seconds", str(dialog_wait)] if dialog_wait is not None else []), cwd=attempt, capture_output=True,
+                    text=True, timeout=45, env=dict(os.environ, CANTABILE_FIXTURE_KONTAKT_KEYS=mode))
                 published = attempt / "prepared.vstpreset"
                 assert "synthetic_duplicate_f11" not in direct.stderr, (mode, direct.stderr)
                 assert "synthetic_f11_unfocused" not in direct.stderr, (mode, direct.stderr)
-                if mode in ("sdk", "sdk-focus", "sdk-false", "native", "native-nested-focus", "native-parent-focus"):
+                if mode in ("sdk", "sdk-focus", "sdk-false", "sdk-delayed", "native", "native-nested-focus", "native-parent-focus"):
                     assert direct.returncode == 0 and published.exists(), (mode, direct.stdout, direct.stderr)
+                    assert json.loads(direct.stdout)["dialog_wait_seconds"] == (dialog_wait if dialog_wait is not None else 20), direct.stdout
+                    if mode == "sdk-delayed":
+                        assert time.monotonic() - began >= 24 and "synthetic_delayed_dialog=true" in direct.stderr, direct.stderr
                     if mode.startswith("sdk"):
                         assert "synthetic_native_f11" not in direct.stderr, (mode, direct.stderr)
                     else:
@@ -195,6 +205,26 @@ def main():
                     assert expected in direct.stdout, (mode, direct.stdout, direct.stderr)
             assert client.tool("file_list", {}) == files
             assert client.tool("project_get", {}) == before
+            for value in ("0", "91", "1.5", ""):
+                invalid = subprocess.run([worker, "kontakt-prepare", "--plugin", fixture,
+                    "--dialog-wait-seconds", value], capture_output=True, text=True, timeout=10)
+                assert invalid.returncode != 0 and "--dialog-wait-seconds must be an integer from 1 to 90" in invalid.stdout, invalid.stdout
+            misplaced = subprocess.run([worker, "list", "--plugin", fixture, "--dialog-wait-seconds", "30"],
+                capture_output=True, text=True, timeout=10)
+            assert misplaced.returncode != 0 and "INVALID_ARGUMENT" in misplaced.stdout, misplaced.stdout
+            for index, value in enumerate(("0", "91", "invalid", "")):
+                os.environ["CANTABILE_KONTAKT_DIALOG_WAIT_SECONDS"] = value
+                invalid_client = test_host.Client(root / ("invalid-config-" + str(index)))
+                try:
+                    unchanged = invalid_client.tool("project_get", {})
+                    unchanged_files = invalid_client.tool("file_list", {})
+                    rejected = invalid_client.tool_result("kontakt_prepare_begin", request)
+                    assert rejected.get("isError") and "kontakt_dialog_wait_invalid" in json.dumps(rejected), rejected
+                    assert invalid_client.tool("project_get", {}) == unchanged
+                    assert invalid_client.tool("file_list", {}) == unchanged_files
+                finally:
+                    invalid_client.close()
+            os.environ["CANTABILE_KONTAKT_DIALOG_WAIT_SECONDS"] = "30"
         finally:
             client.close()
     print("PASS: original SDK/editor/dialog/MCP fixture; vendor Lua and commercial libraries remain unverified")

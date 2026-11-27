@@ -231,9 +231,12 @@ json prepare_kontakt(const Options& options, const json& request, PlugProvider& 
     // editors can still handle F11 without an available native child target.
     kontakt_focus_child(editor.frame->window);
     KontaktDialog dialog; dialog.parent = editor.frame->window; dialog.thread = GetCurrentThreadId(); dialog.script = script;
+    // Do not open a modal picker if there is no remaining discovery budget.
+    const auto dialog_deadline = std::min(*script_deadline - std::chrono::seconds(2),
+        Clock::now() + std::chrono::seconds(options.kontakt_dialog_wait_seconds));
+    if (dialog_deadline <= Clock::now()) fail("KONTAKT_LUA_UNAVAILABLE", "Insufficient dialog discovery time before the worker deadline");
     std::atomic<bool> dialog_done{false};
     std::jthread submit([&](std::stop_token stop) {
-        const auto dialog_deadline = std::min(*script_deadline, Clock::now() + std::chrono::seconds(20));
         while (!stop.stop_requested() && Clock::now() < dialog_deadline && !dialog.submitted) {
             EnumThreadWindows(dialog.thread, KontaktDialog::find, reinterpret_cast<LPARAM>(&dialog));
             std::this_thread::sleep_for(std::chrono::milliseconds(40));
@@ -277,6 +280,7 @@ json prepare_kontakt(const Options& options, const json& request, PlugProvider& 
     kontakt_progress(root, "state_captured");
     WaveFile output(options.output); output.bytes(state.data(), state.size()); output.publish();
     return {{"ok", true}, {"schema_version", 1}, {"adapter", "kontakt_lua_editor"},
-        {"class_id", provider.getClassInfo().ID().toString()}, {"instrument_count", 1}, {"audible_verified", false}};
+        {"class_id", provider.getClassInfo().ID().toString()}, {"instrument_count", 1}, {"audible_verified", false},
+        {"dialog_wait_seconds", options.kontakt_dialog_wait_seconds}};
 #endif
 }
