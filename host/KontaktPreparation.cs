@@ -81,8 +81,8 @@ internal sealed class KontaktPreparation(Workspace workspace)
             var summary = JsonSerializer.SerializeToNode(new { code, preparation_stage = stage, dialog_wait_seconds = dialogWaitSeconds,
                 rollback = new { attempted = false, restored = (bool?)null, status = "not_attempted" } })!.AsObject();
             // Only host-created diagnostics; vendor stdout/stderr is never forwarded.
-            if (error is WorkerFailure { Code: "vst_output_limit" } outputFailure)
-                foreach (string name in new[] { "output_limit", "termination" })
+            if (error is WorkerFailure { Code: "vst_output_limit" or "vst_worker_crashed" } outputFailure)
+                foreach (string name in new[] { "output_limit", "termination", "result_channel" })
                     if (outputFailure.Summary.TryGetProperty(name, out var value))
                         summary[name] = System.Text.Json.Nodes.JsonNode.Parse(value.GetRawText());
             throw new WorkerFailure(code, JsonSerializer.SerializeToElement(summary));

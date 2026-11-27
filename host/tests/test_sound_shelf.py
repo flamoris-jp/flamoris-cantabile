@@ -209,6 +209,34 @@ class SoundShelfTests(unittest.TestCase):
         self.client.tool('sound_remove', {'sound_id':a['sound_id'],'expected_sha256':a['state']['sha256']})
         self.assertEqual(self.client.tool('sound_search', {},guard=False)['total'],0)
 
+    def test_render_invalid_result_reports_exit_and_counts_without_text(self):
+        sound = self.register()
+        before = self.project()
+        files = self.client.tool('file_list', {}, guard=False)
+        for exit_code in (0, 17):
+            with self.subTest(exit_code=exit_code):
+                source = WORKER.replace("else:\n    value = 0.125", "else:\n"
+                    "    sys.stderr.write('private-diagnostic')\n"
+                    "    print('private-result')\n"
+                    f"    sys.exit({exit_code})\n    value = 0.125")
+                self.worker.write_text(f'#!{sys.executable}\n' + source)
+                failure = self.wait(self.client.tool('sound_preview', {'sound_id':sound['sound_id'], 'phrase':'melody'}), expected='failed')
+                error = failure['error']
+                self.assertEqual(error['code'], 'vst_worker_crashed')
+                self.assertEqual(error['track_id'], 'preview')
+                channel = error['result_channel']
+                self.assertEqual(channel['kind'], 'invalid_json')
+                self.assertEqual(channel['exit_code'], exit_code)
+                self.assertFalse(channel['stdout_empty'])
+                self.assertFalse(channel['stdout_starts_with_object'])
+                self.assertEqual(channel['stdout_characters'], len('private-result\n'))
+                self.assertEqual(channel['stderr_characters'], len('private-diagnostic'))
+                self.assertNotIn('private-result', json.dumps(failure))
+                self.assertNotIn('private-diagnostic', json.dumps(failure))
+                self.assertNotIn(str(self.root), json.dumps(failure))
+                self.assertEqual(self.project(), before)
+                self.assertEqual(self.client.tool('file_list', {}, guard=False), files)
+
     def test_missing_plugin_and_malformed_or_mismatched_state(self):
         a=self.register(); before=self.project()
         result=self.client.tool('vst_script_write', {'track_id':'p0',**script({'op':'save_state','name':'test.vstpreset'})})

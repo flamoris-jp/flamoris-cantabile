@@ -160,6 +160,14 @@ but does not establish a vendor crash. `state_captured` records completion of th
 in-memory standard state request, before file publication and host validation;
 it does not certify a successful artifact or audible recall.
 
+The historical `vst_worker_crashed` code also covers a worker whose stdout is
+empty or is not valid result JSON. Such failures now include a host-created
+`result_channel` summary: `kind:invalid_json`, actual exit code, stdout/stderr
+character counts, whether stdout was empty and whether it began with an object.
+Preparation and catalog render failures preserve this summary without the text.
+An exit code of zero with malformed output does not prove a native crash, and a
+successful artifact is never inferred from output shape or exit code alone.
+
 Kontakt's separately enabled MCP server is documented for instrument/UI
 development. This adapter does not enable or connect to it. Its presence alone
 does not establish instrument/snapshot loading or VST3 state transfer support.
