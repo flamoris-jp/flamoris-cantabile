@@ -146,6 +146,49 @@ class SoundShelfTests(unittest.TestCase):
         self.start(); self.assertEqual(self.project()['project'],assigned)
         self.assertEqual(self.client.tool('sound_search', {},guard=False)['total'],1)
 
+    def test_kontakt_render_stderr_budget_and_private_overflow_diagnostics(self):
+        # Original operator-configured subprocess only; no vendor plugin/data.
+        # Exercise the real catalog -> shelf preview / project-render route.
+        cases = [
+            ('Native Instruments', 'Kontakt 8', 32768, True, 1048576),
+            ('Native Instruments', 'Kontakt 7', 32768, True, 1048576),
+            ('Fixture', 'Kontakt 8', 32768, False, 16384),
+            ('Native Instruments', 'Different instrument', 32768, False, 16384),
+            ('Native Instruments', 'Kontakt 8', 1048577, False, 1048576),
+        ]
+        for vendor, name, count, succeeds, maximum in cases:
+            with self.subTest(vendor=vendor, name=name, count=count):
+                source = WORKER.replace("'name':'Test keys','vendor':'Fixture'",
+                                        f"'name':{name!r},'vendor':{vendor!r}")
+                source = source.replace("else:\n    value = 0.125", "else:\n"
+                    f"    sys.stderr.write('private-diagnostic-' + 'x' * {count - 19})\n"
+                    "    sys.stderr.flush()\n    value = 0.125")
+                self.worker.write_text(f'#!{sys.executable}\n' + source)
+                self.wait(self.client.tool('vst_scan', {}))
+                sound = self.register()
+                before = self.project()
+                files = self.client.tool('file_list', {}, guard=False)
+                preview = self.wait(self.client.tool('sound_preview', {'sound_id':sound['sound_id'], 'phrase':'melody'}),
+                                    expected='completed' if succeeds else 'failed')
+                self.assertEqual(self.project(), before)
+                self.assertNotIn('private-diagnostic-', json.dumps(preview))
+                self.assertNotIn(str(self.root), json.dumps(preview))
+                if succeeds:
+                    self.assertGreater(preview['result']['render']['audio']['peak'], 0)
+                    self.client.tool('sound_assign', {'track_id':'p0', 'sound_id':sound['sound_id']})
+                    self.client.tool('sound_assign', {'track_id':'p1', 'sound_id':sound['sound_id']})
+                    project_render = self.wait(self.client.tool('audio_render', {}))
+                    self.assertGreater(project_render['result']['audio']['peak'], 0)
+                else:
+                    error = preview['error']
+                    self.assertEqual(error['code'], 'vst_output_limit')
+                    self.assertEqual(error['track_id'], 'preview')
+                    self.assertEqual(error['output_limit']['stream'], 'stderr')
+                    self.assertEqual(error['output_limit']['maximum_characters'], maximum)
+                    self.assertGreater(error['output_limit']['observed_characters'], maximum)
+                    self.assertIn('host_kill_requested', error['termination'])
+                    self.assertEqual(self.client.tool('file_list', {}, guard=False), files)
+
     def test_validation_missing_version_corruption_and_guard_are_atomic(self):
         a = self.register(); before=self.project()
         self.failure('sound_assign', {'track_id':'absent','sound_id':a['sound_id']},'NOT_FOUND')
