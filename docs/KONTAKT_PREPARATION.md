@@ -87,6 +87,17 @@ MIDI output and internal generation remain separate capabilities.
    Kontakt window appears during preparation. Avoid interacting with it while
    loading; closing it declines the operation.
 
+For operator-assisted diagnosis, `CANTABILE_KONTAKT_DIALOG_WAIT_SECONDS` sets
+the Open-dialog discovery wait to an integer from 1 to 90 seconds (default 20).
+Set it locally before starting the host, for example to `90`, to allow time to
+inspect the fresh editor's menu or Developer settings. The worker CLI accepts
+the same bounded `--dialog-wait-seconds` option only for `kontakt-prepare`.
+The total 120-second worker / 125-second host deadlines still apply, and the
+dialog wait reserves two seconds before the total worker deadline. This changes
+the waiting budget only: it adds no GUI actions, shortcut retries or permission
+changes, and does not make an unsupported Lua entry point available. Existing
+job cancellation and closing the owned editor remain available.
+
 No credentials, installed-library paths, commercial presets, audio or workstation
 inventory belong in this public repository. The sample above is fictitious.
 
@@ -123,7 +134,9 @@ another dialog, an ambiguous native editor hierarchy or no supported F11 route
 may fail with `KONTAKT_EDITOR_UNSUPPORTED`, `KONTAKT_LUA_UNAVAILABLE` or
 `vst_timeout`; that is not a successful load. Bounded failure diagnostics identify
 SDK dispatch, native target selection and native dispatch separately, without
-window text, handles or filesystem paths. The direct
+window text, handles or filesystem paths. Successful results and typed failures
+include the configured `dialog_wait_seconds`; the worker echoes it and the host
+validates the successful handoff. Update host and worker together. The direct
 CLI must also be supervised because a vendor modal UI can block its calling thread.
 
 Kontakt's separately enabled MCP server is documented for instrument/UI
@@ -142,6 +155,9 @@ also exercises SDK-handled keys, native-only keys, a declined SDK callback after
 successful loading, real Win32 focus requirements for SDK/native handlers,
 nested-child focus redirection, parent-frame activation focus forwarding,
 absent/ambiguous native children and unsupported shortcuts.
+It also checks bounded wait configuration, host-to-worker forwarding, rejection
+before worker launch for invalid host settings, and an actual native dialog that
+opens after 25 seconds using an explicitly extended wait.
 It is neither installed nor included in the portable package.
 
 An independent Lua 5.4 gate executes the actual generated script against a

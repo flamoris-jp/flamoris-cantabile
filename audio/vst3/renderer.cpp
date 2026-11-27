@@ -97,6 +97,7 @@ struct Options {
     int preroll_ms = 0;
     bool capture = false;
     bool kontakt_prepare = false;
+    int kontakt_dialog_wait_seconds = 20;
     int start_tick = 0, end_tick = -1, max_events = 8192;
     bool list = false, realtime = false, inspect = false, scripting = false, allow_write = false, floating = false;
 };
@@ -123,7 +124,7 @@ Options parse(int argc, Char** argv) {
     for (int i = (options.list || options.inspect || options.scripting || options.capture || options.kontakt_prepare) ? 2 : 1; i < argc; ++i) {
         const auto flag = utf8(argv[i]);
         if (options.kontakt_prepare && flag != "--plugin" && flag != "--class-id" && flag != "--script" && flag != "--workspace" &&
-            flag != "--output" && flag != "--max-seconds" && flag != "--allow-write") fail("INVALID_ARGUMENT", "Unknown preparation option");
+            flag != "--output" && flag != "--max-seconds" && flag != "--allow-write" && flag != "--dialog-wait-seconds") fail("INVALID_ARGUMENT", "Unknown preparation option");
         if (flag == "--float-output" && !options.list && !options.inspect && !options.scripting) { options.floating = true; continue; }
         if (flag == "--allow-write" && (options.scripting || options.kontakt_prepare)) { options.allow_write = true; continue; }
         if (flag == "--realtime" && !options.list) {
@@ -140,6 +141,7 @@ Options parse(int argc, Char** argv) {
         else if (flag == "--midi" && !options.list && !options.inspect && !options.scripting) options.midi = value;
         else if (flag == "--output" && !options.list && !options.inspect && !options.scripting) options.output = value;
         else if (flag == "--max-seconds" && !options.list) options.max_seconds = bounded_integer(value, flag, 1, 600);
+        else if (flag == "--dialog-wait-seconds" && options.kontakt_prepare) options.kontakt_dialog_wait_seconds = bounded_integer(value, flag, 1, 90);
         else if (flag == "--warmup-ms" && !options.list) options.warmup_ms = bounded_integer(value, flag, 0, 30000);
         else if (flag == "--preroll-ms" && !options.list) options.preroll_ms = bounded_integer(value, flag, 0, 30000);
         else if (flag == "--start-tick" && options.capture) options.start_tick = bounded_integer(value, flag, 0, 2147483647);
@@ -620,6 +622,7 @@ int main_for(int argc, Char** argv) {
                          "cantabile-client capture --plugin PATH.vst3 --midi PART.mid --output GENERATED.mid\n"
                          "cantabile-client kontakt-prepare --plugin Kontakt.vst3 --class-id ID --script REQUEST.json\n"
                          "                 --workspace DIR --output DIR/prepared.vstpreset --max-seconds 120 --allow-write\n"
+                         "                 [--dialog-wait-seconds 20] (1..90; total deadline remains bounded)\n"
                          "                 [--start-tick 0] [--end-tick N] [--max-events 8192]\n"
                          "cantabile-client --plugin PATH.vst3 [--class-id ID] [--preset FILE.vstpreset]\n"
                          "                 --midi PART.mid --output OUT.wav [--max-seconds 600]\n"

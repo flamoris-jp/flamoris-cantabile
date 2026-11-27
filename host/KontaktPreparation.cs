@@ -9,11 +9,20 @@ internal sealed class KontaktPreparation(Workspace workspace)
 {
     private readonly string? worker = Environment.GetEnvironmentVariable("CANTABILE_RENDERER");
     private readonly bool enabled = Environment.GetEnvironmentVariable("CANTABILE_KONTAKT_PREPARE")?.ToLowerInvariant() is "true" or "1";
+    private static int DialogWaitSeconds()
+    {
+        string? value = Environment.GetEnvironmentVariable("CANTABILE_KONTAKT_DIALOG_WAIT_SECONDS");
+        if (value is null) return 20;
+        if (!int.TryParse(value, System.Globalization.NumberStyles.None, System.Globalization.CultureInfo.InvariantCulture, out int seconds) || seconds < 1 || seconds > 90)
+            throw new McpFault("kontakt_dialog_wait_invalid");
+        return seconds;
+    }
     internal void DemandEnabled()
     {
         if (!enabled) throw new McpFault("kontakt_prepare_disabled");
         if (!OperatingSystem.IsWindows()) throw new McpFault("kontakt_platform_unsupported");
         if (!File.Exists(worker)) throw new McpFault("vst_backend_unavailable");
+        _ = DialogWaitSeconds();
     }
     internal static void DemandKontakt(VstCatalog.Entry target)
     {
@@ -23,6 +32,7 @@ internal sealed class KontaktPreparation(Workspace workspace)
         Action<int, int> progress, CancellationToken token)
     {
         DemandEnabled(); DemandKontakt(target);
+        int dialogWaitSeconds = DialogWaitSeconds();
         string sandbox = workspace.CreateVstSandbox(), pending = workspace.TempFile(".vstpreset");
         try
         {
@@ -33,10 +43,12 @@ internal sealed class KontaktPreparation(Workspace workspace)
             await File.WriteAllTextAsync(request, JsonSerializer.Serialize(new { version = 1, instrument = selection.Instrument.Path,
                 snapshot = selection.Snapshot?.Path, nonce = Guid.NewGuid().ToString("N") }), token);
             var result = await WorkerProcess.Run(worker!, ["kontakt-prepare", "--plugin", target.Path, "--class-id", target.ClassId,
-                "--script", request, "--workspace", sandbox, "--output", output, "--max-seconds", "120", "--allow-write"],
+                "--script", request, "--workspace", sandbox, "--output", output, "--max-seconds", "120", "--allow-write",
+                "--dialog-wait-seconds", dialogWaitSeconds.ToString(System.Globalization.CultureInfo.InvariantCulture)],
                 sandbox, TimeSpan.FromSeconds(125), token, 16384);
             if (result.GetProperty("schema_version").GetInt32() != 1 || result.GetProperty("adapter").GetString() != "kontakt_lua_editor" ||
-                result.GetProperty("class_id").GetString() != target.ClassId || result.GetProperty("instrument_count").GetInt32() != 1)
+                result.GetProperty("class_id").GetString() != target.ClassId || result.GetProperty("instrument_count").GetInt32() != 1 ||
+                result.GetProperty("dialog_wait_seconds").GetInt32() != dialogWaitSeconds)
                 throw new McpFault("kontakt_prepare_invalid_output");
             Workspace.VerifyParents(sandbox);
             byte[] state = Workspace.ReadBounded(output, SoundShelf.MaximumStateBytes);
@@ -49,6 +61,7 @@ internal sealed class KontaktPreparation(Workspace workspace)
             return JsonSerializer.SerializeToElement(new { artifact, catalog_id = target.Id, plugin_version = target.Version,
                 library_id = selection.LibraryId, instrument_id = selection.Instrument.Id, snapshot_id = selection.Snapshot?.Id,
                 state_captured = true, audible_verified = false, project_changed = false,
+                dialog_wait_seconds = dialogWaitSeconds,
                 next_step = "instrument_state_set_then_render_and_sound_register" });
         }
         catch (OperationCanceledException) { throw; }
@@ -63,7 +76,7 @@ internal sealed class KontaktPreparation(Workspace workspace)
             } catch { }
             string code = error is WorkerFailure workerFailure ? workerFailure.Code : error is McpFault fault ? fault.Code : "kontakt_prepare_failed";
             workspace.VstAudit("kontakt_prepare_begin", code, 1);
-            throw new WorkerFailure(code, JsonSerializer.SerializeToElement(new { code, preparation_stage = stage,
+            throw new WorkerFailure(code, JsonSerializer.SerializeToElement(new { code, preparation_stage = stage, dialog_wait_seconds = dialogWaitSeconds,
                 rollback = new { attempted = false, restored = (bool?)null, status = "not_attempted" } }));
         }
         finally { File.Delete(pending); Directory.Delete(sandbox, recursive: true); }

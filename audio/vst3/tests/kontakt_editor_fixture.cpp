@@ -10,11 +10,13 @@
 #include "base/source/fstreamer.h"
 #include "pluginterfaces/base/keycodes.h"
 #include <algorithm>
+#include <chrono>
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
 #include <string>
+#include <thread>
 #include <vector>
 #define NOMINMAX
 #include <windows.h>
@@ -132,8 +134,13 @@ tresult Editor::onKeyDown(char16, int16 key, int16) {
         std::cerr << "synthetic_parent_focus_forwarded=" << (GetFocus() == child ? "true" : "false") << '\n';
         return kResultFalse;
     }
-    if (mode != "sdk" && mode != "sdk-false" && mode != "sdk-focus") return kResultFalse;
+    if (mode != "sdk" && mode != "sdk-false" && mode != "sdk-focus" && mode != "sdk-delayed") return kResultFalse;
     if (mode == "sdk-focus" && GetFocus() != child) return kResultFalse;
+    if (mode == "sdk-delayed") {
+        // A real delayed native dialog, beyond the former fixed 20s wait.
+        std::cerr << "synthetic_delayed_dialog=true\n";
+        std::this_thread::sleep_for(std::chrono::seconds(25));
+    }
     run_lua_dialog();
     return mode == "sdk-false" ? kResultFalse : kResultTrue;
 }
