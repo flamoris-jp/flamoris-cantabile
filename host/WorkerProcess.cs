@@ -9,6 +9,7 @@ namespace Flamoris.Cantabile.Host;
 // One bounded process per plugin operation. Raw stdout/stderr never reaches MCP.
 internal static class WorkerProcess
 {
+    private readonly record struct ReadResult(string Text, int Characters);
     private sealed class OutputLimit(string stream, int maximum, int observed) : Exception
     {
         public string Stream { get; } = stream;
@@ -26,8 +27,8 @@ internal static class WorkerProcess
         foreach (var argument in arguments) process.StartInfo.ArgumentList.Add(argument);
         SafeEnvironment(process.StartInfo);
         if (!process.Start()) throw new McpFault("vst_start_failed");
-        Task<string> output = Read(process.StandardOutput, "stdout", stdoutMaximum, lifetime.Token);
-        Task<string> errors = Read(process.StandardError, "stderr", stderrMaximum, lifetime.Token, keepText: false);
+        Task<ReadResult> output = Read(process.StandardOutput, "stdout", stdoutMaximum, lifetime.Token);
+        Task<ReadResult> errors = Read(process.StandardError, "stderr", stderrMaximum, lifetime.Token, keepText: false);
         try
         {
             var pending = new List<Task> { process.WaitForExitAsync(lifetime.Token), output, errors };
@@ -56,8 +57,21 @@ internal static class WorkerProcess
             throw;
         }
         JsonElement result;
-        try { using var json = JsonDocument.Parse(await output, new() { MaxDepth = 32 }); result = json.RootElement.Clone(); }
-        catch (JsonException) { throw new McpFault("vst_worker_crashed"); }
+        var stdout = await output; var stderr = await errors;
+        try { using var json = JsonDocument.Parse(stdout.Text, new() { MaxDepth = 32 }); result = json.RootElement.Clone(); }
+        catch (JsonException)
+        {
+            // The historical code includes empty/malformed stdout, not only a
+            // native crash. Report channel shape and exit status without text.
+            throw new WorkerFailure("vst_worker_crashed", JsonSerializer.SerializeToElement(new {
+                code = "vst_worker_crashed",
+                result_channel = new { kind = "invalid_json", exit_code = process.ExitCode,
+                    stdout_characters = stdout.Characters, stderr_characters = stderr.Characters,
+                    stdout_empty = stdout.Characters == 0,
+                    stdout_starts_with_object = stdout.Text.AsSpan().TrimStart().StartsWith("{", StringComparison.Ordinal) },
+                rollback = new { attempted = (bool?)null, restored = (bool?)null, status = "unknown" }
+            }));
+        }
         if (result.ValueKind != JsonValueKind.Object || !result.TryGetProperty("ok", out var ok) || ok.ValueKind != JsonValueKind.True || process.ExitCode != 0)
             throw WorkerFailure.From(result);
         token.ThrowIfCancellationRequested();
@@ -70,7 +84,7 @@ internal static class WorkerProcess
         var safe = info.Environment.Where(p => retained.Contains(p.Key, StringComparer.OrdinalIgnoreCase)).ToArray();
         info.Environment.Clear(); foreach (var entry in safe) info.Environment[entry.Key] = entry.Value;
     }
-    private static async Task<string> Read(StreamReader stream, string name, int maximum, CancellationToken token, bool keepText = true)
+    private static async Task<ReadResult> Read(StreamReader stream, string name, int maximum, CancellationToken token, bool keepText = true)
     {
         var text = keepText ? new StringBuilder() : null;
         var buffer = new char[4096]; int count, observed = 0;
@@ -80,7 +94,7 @@ internal static class WorkerProcess
             if (observed > maximum) throw new OutputLimit(name, maximum, observed);
             text?.Append(buffer, 0, count);
         }
-        return text?.ToString() ?? string.Empty;
+        return new(text?.ToString() ?? string.Empty, observed);
     }
 }
 

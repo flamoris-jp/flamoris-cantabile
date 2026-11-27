@@ -36,8 +36,8 @@ public sealed class BandRenderer(Workspace workspace, VstCatalog catalog)
         var summary = JsonSerializer.SerializeToNode(new { code, track_id = track,
             rollback = new { attempted = (bool?)null, restored = (bool?)null, status = "unknown" } })!.AsObject();
         // Keep host-created overflow counters, never vendor output or paths.
-        if (source is { Code: "vst_output_limit" })
-            foreach (string name in new[] { "output_limit", "termination" })
+        if (source is { Code: "vst_output_limit" or "vst_worker_crashed" })
+            foreach (string name in new[] { "output_limit", "termination", "result_channel" })
                 if (source.Summary.TryGetProperty(name, out var value))
                     summary[name] = System.Text.Json.Nodes.JsonNode.Parse(value.GetRawText());
         return new(code, JsonSerializer.SerializeToElement(summary));

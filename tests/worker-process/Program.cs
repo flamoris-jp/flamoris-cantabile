@@ -16,6 +16,8 @@ internal static class Program
         {
             string mode = args[1];
             if (mode == "crash") return 17;
+            if (mode == "malformed-success") { Console.Write(PrivateText + "{\"ok\":true}"); return 0; }
+            if (mode == "malformed-object") { Console.Write("  {" + PrivateText); return 0; }
             if (mode == "wait") { await Task.Delay(60000); return 0; }
             if (mode.StartsWith("kontakt-stderr-", StringComparison.Ordinal))
             {
@@ -88,9 +90,23 @@ internal static class Program
             try { await Run("wait", token: cancel.Token); throw new Exception("Cancellation was accepted"); }
             catch (OperationCanceledException) { Check(cancel.IsCancellationRequested, "caller cancellation"); }
         }
-        try { await Run("crash"); throw new Exception("Crash was accepted"); }
-        catch (McpFault fault) { Check(fault.Code == "vst_worker_crashed", "crash classification"); }
-        Console.WriteLine("PASS: default/Kontakt output bounds, noisy stderr, typed failures, host termination, privacy, timeout, cancellation and crash");
+        foreach (string mode in new[] { "crash", "malformed-success", "malformed-object" })
+        {
+            try { await Run(mode); throw new Exception("Invalid worker result was accepted"); }
+            catch (WorkerFailure failure)
+            {
+                Check(failure.Code == "vst_worker_crashed", "compatible result failure code");
+                var channel = failure.Summary.GetProperty("result_channel");
+                Check(channel.GetProperty("kind").GetString() == "invalid_json", "result channel classification");
+                Check(channel.GetProperty("exit_code").GetInt32() == (mode == "crash" ? 17 : 0), "exit code preserved");
+                Check(channel.GetProperty("stdout_empty").GetBoolean() == (mode == "crash"), "empty output distinguished");
+                Check(channel.GetProperty("stdout_starts_with_object").GetBoolean() == (mode == "malformed-object"), "JSON object prefix");
+                Check(channel.GetProperty("stdout_characters").GetInt32() >= 0, "bounded stdout count");
+                Check(channel.GetProperty("stderr_characters").GetInt32() == 0, "bounded stderr count");
+                Check(!failure.Summary.GetRawText().Contains(PrivateText, StringComparison.Ordinal), "result channel privacy");
+            }
+        }
+        Console.WriteLine("PASS: default/Kontakt bounds, diagnostics, malformed results, exit codes, privacy, timeout and cancellation");
         return 0;
     }
     private static void Check(bool condition, string message)
