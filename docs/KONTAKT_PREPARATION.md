@@ -139,6 +139,18 @@ include the configured `dialog_wait_seconds`; the worker echoes it and the host
 validates the successful handoff. Update host and worker together. The direct
 CLI must also be supervised because a vendor modal UI can block its calling thread.
 
+`vst_output_limit` is a supervisor pipe-output failure, not the preset-size limit.
+Kontakt preparation retains separate 16,384-character stdout and stderr bounds.
+The failure now includes `output_limit.stream`, `maximum_characters` and
+`observed_characters` (the count at the first overflowing read, not a total), plus
+`termination.exited_before_cleanup`, `host_kill_requested` and the exit code after
+cleanup. These are host-created counters/flags only; no vendor text or paths are
+returned or retained. A requested host kill explains an owned window disappearing
+but does not establish a vendor crash. `state_captured` records completion of the
+in-memory standard state request, before file publication and host validation;
+it does not certify a successful artifact or audible recall. Existing output,
+state, cancellation and total-time limits remain unchanged.
+
 Kontakt's separately enabled MCP server is documented for instrument/UI
 development. This adapter does not enable or connect to it. Its presence alone
 does not establish instrument/snapshot loading or VST3 state transfer support.
