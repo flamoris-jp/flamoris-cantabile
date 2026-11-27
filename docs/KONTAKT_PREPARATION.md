@@ -147,8 +147,8 @@ text. Catalog-backed rendering (including sound previews) uses the same larger
 stderr budget only for catalog entries with vendor `Native Instruments` and
 name `Kontakt 7` or `Kontakt 8`; other entries and worker operations retain their
 existing 16,384-character stderr bound. More diagnostic text does
-not imply success: valid stdout, a successful exit, receipt/state validation and
-publication are still required. Exceeding either hard bound still kills the
+not imply success: valid result JSON, a successful exit and the operation-specific
+receipt/state/audio validation and publication are still required. Exceeding either hard bound still kills the
 worker; timeout/cancellation and the 1 MiB state-file limit are unchanged.
 The failure now includes `output_limit.stream`, `maximum_characters` and
 `observed_characters` (the count at the first overflowing read, not a total), plus
@@ -167,6 +167,21 @@ character counts, whether stdout was empty and whether it began with an object.
 Preparation and catalog render failures preserve this summary without the text.
 An exit code of zero with malformed output does not prove a native crash, and a
 successful artifact is never inferred from output shape or exit code alone.
+
+Catalog rendering for those exact Kontakt entries uses an explicit private
+`--result-json` file in the fresh worker sandbox. The native worker reserves a
+new staging file before loading vendor code, then atomically publishes at most
+16,384 bytes of result JSON without overwriting an existing file. Stdout and
+stderr are still continuously drained, counted and bounded; neither text is
+retained in this mode. Other operations keep their existing stdout protocol.
+The host reads only a bounded regular result file after the worker exits, then
+requires `ok:true`, exit code zero, the expected render metadata and a valid WAV
+before publishing audio. It never scans vendor output for a JSON suffix.
+Missing, unreadable, oversized or invalid result files fail without publishing
+artifacts; `result_channel.source:file` identifies this route and reports only
+safe channel metadata. Protocol files are deleted with the sandbox and are not
+artifacts. This separates vendor logging from result transport; it does not
+establish commercial Kontakt audio acceptance.
 
 Kontakt's separately enabled MCP server is documented for instrument/UI
 development. This adapter does not enable or connect to it. Its presence alone

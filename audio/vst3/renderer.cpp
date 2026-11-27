@@ -90,7 +90,7 @@ std::string utf8(const fs::path& path) {
 }
 
 struct Options {
-    fs::path plugin, preset, midi, output, script, workspace;
+    fs::path plugin, preset, midi, output, script, workspace, result_json;
     std::string class_id;
     int max_seconds = 600;
     int warmup_ms = 0;
@@ -140,6 +140,7 @@ Options parse(int argc, Char** argv) {
         else if (flag == "--workspace" && (options.scripting || options.kontakt_prepare)) options.workspace = value;
         else if (flag == "--midi" && !options.list && !options.inspect && !options.scripting) options.midi = value;
         else if (flag == "--output" && !options.list && !options.inspect && !options.scripting) options.output = value;
+        else if (flag == "--result-json" && !options.list && !options.inspect && !options.scripting && !options.capture && !options.kontakt_prepare) options.result_json = value;
         else if (flag == "--max-seconds" && !options.list) options.max_seconds = bounded_integer(value, flag, 1, 600);
         else if (flag == "--dialog-wait-seconds" && options.kontakt_prepare) options.kontakt_dialog_wait_seconds = bounded_integer(value, flag, 1, 90);
         else if (flag == "--warmup-ms" && !options.list) options.warmup_ms = bounded_integer(value, flag, 0, 30000);
@@ -614,6 +615,9 @@ json run(const Options& options) {
 
 template<typename Char>
 int main_for(int argc, Char** argv) {
+    std::unique_ptr<WaveFile> result_output;
+    json result;
+    int exit_code = 0;
     try {
         if (argc == 1 || (argc == 2 && fs::path(argv[1]) == "--help")) {
             std::cout << "cantabile-client list --plugin PATH.vst3\n"
@@ -626,19 +630,30 @@ int main_for(int argc, Char** argv) {
                          "                 [--start-tick 0] [--end-tick N] [--max-events 8192]\n"
                          "cantabile-client --plugin PATH.vst3 [--class-id ID] [--preset FILE.vstpreset]\n"
                          "                 --midi PART.mid --output OUT.wav [--max-seconds 600]\n"
-                         "                 [--realtime] [--warmup-ms 0] [--preroll-ms 0] [--float-output]\n";
+                         "                 [--realtime] [--warmup-ms 0] [--preroll-ms 0] [--float-output] [--result-json NEW_FILE]\n";
             return 0;
         }
-        std::cout << run(parse(argc, argv)).dump(-1, ' ', false, json::error_handler_t::replace) << '\n';
-        return 0;
+        const auto options = parse(argc, argv);
+        // Reserve a fresh private result channel before loading vendor code.
+        // WaveFile is the shared atomic, exclusive byte-file publisher.
+        if (!options.result_json.empty()) result_output = std::make_unique<WaveFile>(options.result_json);
+        result = run(options);
     } catch (const std::exception& exception) {
         const auto* error = dynamic_cast<const Error*>(&exception);
-        json result{{"ok", false}, {"error", {{"code", error ? error->code : "RENDER_FAILED"},
-                                                  {"message", exception.what()}}}};
+        result = {{"ok", false}, {"error", {{"code", error ? error->code : "RENDER_FAILED"},
+                                             {"message", exception.what()}}}};
         for (auto it = script_failure.begin(); it != script_failure.end(); ++it) result["error"][it.key()] = it.value();
-        std::cout << result.dump(-1, ' ', false, json::error_handler_t::replace) << '\n';
-        return 1;
+        exit_code = 1;
     }
+    try {
+        const auto bytes = result.dump(-1, ' ', false, json::error_handler_t::replace) + '\n';
+        if (result_output) {
+            if (bytes.size() > 16384) fail("OUTPUT_FAILED", "Render result exceeds channel limit");
+            result_output->bytes(bytes.data(), bytes.size());
+            result_output->publish();
+        } else std::cout << bytes;
+    } catch (const std::exception&) { return 1; }
+    return exit_code;
 }
 } // namespace
 
