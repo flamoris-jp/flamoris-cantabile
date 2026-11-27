@@ -9,6 +9,12 @@ namespace Flamoris.Cantabile.Host;
 // One bounded process per plugin operation. Raw stdout/stderr never reaches MCP.
 internal static class WorkerProcess
 {
+    private sealed class OutputLimit(string stream, int maximum, int observed) : Exception
+    {
+        public string Stream { get; } = stream;
+        public int Maximum { get; } = maximum;
+        public int Observed { get; } = observed;
+    }
     public static async Task<JsonElement> Run(string executable, IEnumerable<string> arguments, string directory,
         TimeSpan timeout, CancellationToken token, int stdoutMaximum = 4 * 1024 * 1024)
     {
@@ -20,18 +26,33 @@ internal static class WorkerProcess
         foreach (var argument in arguments) process.StartInfo.ArgumentList.Add(argument);
         SafeEnvironment(process.StartInfo);
         if (!process.Start()) throw new McpFault("vst_start_failed");
-        Task<string> output = Read(process.StandardOutput, stdoutMaximum, lifetime.Token);
-        Task<string> errors = Read(process.StandardError, 16384, lifetime.Token);
+        Task<string> output = Read(process.StandardOutput, "stdout", stdoutMaximum, lifetime.Token);
+        Task<string> errors = Read(process.StandardError, "stderr", 16384, lifetime.Token);
         try
         {
             var pending = new List<Task> { process.WaitForExitAsync(lifetime.Token), output, errors };
             while (pending.Count > 0) { var done = await Task.WhenAny(pending); await done; pending.Remove(done); }
         }
-        catch
+        catch (Exception error)
         {
-            try { process.Kill(entireProcessTree: true); await process.WaitForExitAsync(CancellationToken.None); } catch (InvalidOperationException) { }
+            bool exitedBeforeCleanup = process.HasExited, killRequested = false;
+            try
+            {
+                if (!exitedBeforeCleanup) { process.Kill(entireProcessTree: true); killRequested = true; }
+                await process.WaitForExitAsync(CancellationToken.None);
+            }
+            catch (InvalidOperationException) { }
             try { await Task.WhenAll(output, errors); } catch { }
             if (lifetime.IsCancellationRequested && !token.IsCancellationRequested) throw new McpFault("vst_timeout");
+            if (error is OutputLimit limit)
+                throw new WorkerFailure("vst_output_limit", JsonSerializer.SerializeToElement(new {
+                    code = "vst_output_limit",
+                    output_limit = new { stream = limit.Stream, maximum_characters = limit.Maximum,
+                        observed_characters = limit.Observed },
+                    termination = new { exited_before_cleanup = exitedBeforeCleanup, host_kill_requested = killRequested,
+                        exit_code = process.HasExited ? (int?)process.ExitCode : null },
+                    rollback = new { attempted = (bool?)null, restored = (bool?)null, status = "unknown" }
+                }));
             throw;
         }
         JsonElement result;
@@ -49,11 +70,11 @@ internal static class WorkerProcess
         var safe = info.Environment.Where(p => retained.Contains(p.Key, StringComparer.OrdinalIgnoreCase)).ToArray();
         info.Environment.Clear(); foreach (var entry in safe) info.Environment[entry.Key] = entry.Value;
     }
-    private static async Task<string> Read(StreamReader stream, int maximum, CancellationToken token)
+    private static async Task<string> Read(StreamReader stream, string name, int maximum, CancellationToken token)
     {
         var text = new StringBuilder(); var buffer = new char[4096]; int count;
         while ((count = await stream.ReadAsync(buffer.AsMemory(), token)) > 0)
-        { if (text.Length + count > maximum) throw new McpFault("vst_output_limit"); text.Append(buffer, 0, count); }
+        { if (text.Length + count > maximum) throw new OutputLimit(name, maximum, text.Length + count); text.Append(buffer, 0, count); }
         return text.ToString();
     }
 }

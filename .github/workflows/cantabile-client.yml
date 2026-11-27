@@ -33,6 +33,11 @@ jobs:
           cmake --build build-vst --config Release --parallel 2 --target cantabile-client cantabile-cli cantabile-render cantabile-kontakt-editor-fixture
       - name: Build existing MCP host
         run: dotnet build host/Flamoris.Cantabile.Host.csproj -c Release
+      - name: Worker output limits and termination diagnostics
+        shell: pwsh
+        run: |
+          dotnet run --project tests/worker-process/WorkerProcess.Tests.csproj -c Release -- (Get-Command dotnet).Source
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
       - name: Synthetic Kontakt editor preparation and state handoff
         # Original SDK/Win32 fixture only. This is not vendor Lua acceptance.
         shell: pwsh

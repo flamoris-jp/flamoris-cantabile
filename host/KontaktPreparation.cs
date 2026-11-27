@@ -76,8 +76,14 @@ internal sealed class KontaktPreparation(Workspace workspace)
             } catch { }
             string code = error is WorkerFailure workerFailure ? workerFailure.Code : error is McpFault fault ? fault.Code : "kontakt_prepare_failed";
             workspace.VstAudit("kontakt_prepare_begin", code, 1);
-            throw new WorkerFailure(code, JsonSerializer.SerializeToElement(new { code, preparation_stage = stage, dialog_wait_seconds = dialogWaitSeconds,
-                rollback = new { attempted = false, restored = (bool?)null, status = "not_attempted" } }));
+            var summary = JsonSerializer.SerializeToNode(new { code, preparation_stage = stage, dialog_wait_seconds = dialogWaitSeconds,
+                rollback = new { attempted = false, restored = (bool?)null, status = "not_attempted" } })!.AsObject();
+            // Only host-created diagnostics; vendor stdout/stderr is never forwarded.
+            if (error is WorkerFailure { Code: "vst_output_limit" } outputFailure)
+                foreach (string name in new[] { "output_limit", "termination" })
+                    if (outputFailure.Summary.TryGetProperty(name, out var value))
+                        summary[name] = System.Text.Json.Nodes.JsonNode.Parse(value.GetRawText());
+            throw new WorkerFailure(code, JsonSerializer.SerializeToElement(summary));
         }
         finally { File.Delete(pending); Directory.Delete(sandbox, recursive: true); }
     }
