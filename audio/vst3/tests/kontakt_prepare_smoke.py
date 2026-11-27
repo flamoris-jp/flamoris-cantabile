@@ -90,6 +90,7 @@ def main():
         (library / "Original '声' [1].nki").write_text("original synthetic ready")
         (library / "Failure.nki").write_text("original synthetic failure")
         (library / "Variant.nksn").write_text("synthetic snapshot")
+        (library / "Diagnostics.nki").write_text("original synthetic noisy stderr")
         config = root / "libraries.json"
         config.write_text(json.dumps({"version": 1, "libraries": [{"id": "original", "name": "Synthetic", "root": str(library)}]}))
         os.environ.update(CANTABILE_KONTAKT_LIBRARIES=str(config), CANTABILE_KONTAKT_PREPARE="true",
@@ -106,6 +107,7 @@ def main():
             original = next(x for x in items if "Original" in x["display_name"])
             failed = next(x for x in items if x["display_name"] == "Failure.nki")
             snapshot = next(x for x in items if x["kind"] == "snapshot")
+            diagnostics = next(x for x in items if x["display_name"] == "Diagnostics.nki")
             before = client.tool("project_get", {})
             request = dict(catalog_id=target["catalog_id"], library_id="original", instrument_id=original["content_id"], snapshot_id=snapshot["content_id"])
             job = wait(client, client.tool("kontakt_prepare_begin", request))
@@ -142,6 +144,11 @@ def main():
             del no_snapshot["snapshot_id"]
             plain = wait(client, client.tool("kontakt_prepare_begin", no_snapshot))
             assert plain["state"] == "completed" and plain["result"]["snapshot_id"] is None, plain
+            noisy = wait(client, client.tool("kontakt_prepare_begin", dict(no_snapshot, instrument_id=diagnostics["content_id"])))
+            assert noisy["state"] == "completed" and noisy["result"]["state_captured"], noisy
+            assert "synthetic noisy stderr" not in json.dumps(noisy), noisy
+            assert client.download(noisy["result"]["artifact"]["file_id"], chunk=128000)[:4] == b"VST3"
+            assert client.tool("project_get", {}) == before
             client.tool("edit_batch", {"commands": [{"op": "track.add", "track": {"id": "original", "events": []}}]})
             client.tool("instrument_assign", {"track_id": "original", "catalog_id": target["catalog_id"]})
             base = client.tool("project_get", {})["project"]

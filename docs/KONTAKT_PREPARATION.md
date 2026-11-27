@@ -140,7 +140,14 @@ validates the successful handoff. Update host and worker together. The direct
 CLI must also be supervised because a vendor modal UI can block its calling thread.
 
 `vst_output_limit` is a supervisor pipe-output failure, not the preset-size limit.
-Kontakt preparation retains separate 16,384-character stdout and stderr bounds.
+Kontakt preparation keeps the result-JSON stdout bound at 16,384 characters and
+allows up to 1,048,576 diagnostic stderr characters. Stderr is continuously
+drained and counted with a fixed 4,096-character buffer, without retaining its
+text. Other worker operations retain their existing 16,384-character stderr
+bound; only this adapter requests the larger budget. More diagnostic text does
+not imply success: valid stdout, a successful exit, receipt/state validation and
+publication are still required. Exceeding either hard bound still kills the
+worker; timeout/cancellation and the 1 MiB state-file limit are unchanged.
 The failure now includes `output_limit.stream`, `maximum_characters` and
 `observed_characters` (the count at the first overflowing read, not a total), plus
 `termination.exited_before_cleanup`, `host_kill_requested` and the exit code after
@@ -148,8 +155,7 @@ cleanup. These are host-created counters/flags only; no vendor text or paths are
 returned or retained. A requested host kill explains an owned window disappearing
 but does not establish a vendor crash. `state_captured` records completion of the
 in-memory standard state request, before file publication and host validation;
-it does not certify a successful artifact or audible recall. Existing output,
-state, cancellation and total-time limits remain unchanged.
+it does not certify a successful artifact or audible recall.
 
 Kontakt's separately enabled MCP server is documented for instrument/UI
 development. This adapter does not enable or connect to it. Its presence alone
@@ -170,6 +176,10 @@ absent/ambiguous native children and unsupported shortcuts.
 It also checks bounded wait configuration, host-to-worker forwarding, rejection
 before worker launch for invalid host settings, and an actual native dialog that
 opens after 25 seconds using an explicitly extended wait.
+An additional original fixture emits more than the former stderr allowance and
+must still publish a standard state through the real host. The linked-supervisor
+harness checks both the default and Kontakt-specific exact boundaries, overflow
+termination, noisy-stderr success and preservation of typed worker failures.
 It is neither installed nor included in the portable package.
 
 An independent Lua 5.4 gate executes the actual generated script against a

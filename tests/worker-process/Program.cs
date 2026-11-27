@@ -7,6 +7,7 @@ using Flamoris.Mcp.Core;
 internal static class Program
 {
     private const int Maximum = 16384;
+    private const int KontaktStderrMaximum = 1024 * 1024;
     private const string PrivateText = "private-vendor-text";
 
     public static async Task<int> Main(string[] args)
@@ -16,6 +17,17 @@ internal static class Program
             string mode = args[1];
             if (mode == "crash") return 17;
             if (mode == "wait") { await Task.Delay(60000); return 0; }
+            if (mode.StartsWith("kontakt-stderr-", StringComparison.Ordinal))
+            {
+                int size = mode == "kontakt-stderr-small" ? Maximum + 19 : KontaktStderrMaximum;
+                if (mode == "kontakt-stderr-overflow") size++;
+                Console.Error.Write(PrivateText + new string('x', size - PrivateText.Length));
+                Console.Error.Flush();
+                if (mode == "kontakt-stderr-overflow") { await Task.Delay(60000); return 0; }
+                Console.Write(mode == "kontakt-stderr-failure"
+                    ? "{\"ok\":false,\"error\":{\"code\":\"KONTAKT_LOAD_FAILED\"}}" : "{\"ok\":true}");
+                return mode == "kontakt-stderr-failure" ? 1 : 0;
+            }
             var stream = mode.StartsWith("stdout", StringComparison.Ordinal) ? Console.Out : Console.Error;
             bool overflow = mode.EndsWith("overflow", StringComparison.Ordinal);
             if (mode == "stdout-boundary") Console.Write("{\"ok\":true}".PadRight(Maximum));
@@ -27,9 +39,9 @@ internal static class Program
         }
         string executable = Path.GetFullPath(args[0]);
         string assembly = Assembly.GetExecutingAssembly().Location;
-        Task<JsonElement> Run(string mode, TimeSpan? timeout = null, CancellationToken token = default) =>
+        Task<JsonElement> Run(string mode, TimeSpan? timeout = null, CancellationToken token = default, int stderrMaximum = Maximum) =>
             WorkerProcess.Run(executable, [assembly, "--child", mode], Environment.CurrentDirectory,
-                timeout ?? TimeSpan.FromSeconds(15), token, Maximum);
+                timeout ?? TimeSpan.FromSeconds(15), token, Maximum, stderrMaximum);
         foreach (string mode in new[] { "stdout-boundary", "stderr-boundary" })
             Check((await Run(mode)).GetProperty("ok").GetBoolean(), mode);
         foreach (string stream in new[] { "stdout", "stderr" })
@@ -50,6 +62,25 @@ internal static class Program
                 Check(!failure.Summary.GetRawText().Contains(PrivateText, StringComparison.Ordinal), "vendor text privacy");
             }
         }
+        foreach (string mode in new[] { "kontakt-stderr-small", "kontakt-stderr-boundary" })
+            Check((await Run(mode, stderrMaximum: KontaktStderrMaximum)).GetProperty("ok").GetBoolean(), mode);
+        foreach (var test in new[] { (Mode: "kontakt-stderr-overflow", Stream: "stderr", Limit: KontaktStderrMaximum),
+                                    (Mode: "stdout-overflow", Stream: "stdout", Limit: Maximum) })
+        {
+            try { await Run(test.Mode, stderrMaximum: KontaktStderrMaximum); throw new Exception("Overflow was accepted"); }
+            catch (WorkerFailure failure)
+            {
+                Check(failure.Code == "vst_output_limit", "Kontakt overflow classification");
+                var limit = failure.Summary.GetProperty("output_limit");
+                Check(limit.GetProperty("stream").GetString() == test.Stream, "independent stream bounds");
+                Check(limit.GetProperty("maximum_characters").GetInt32() == test.Limit, "Kontakt hard bound");
+                Check(limit.GetProperty("observed_characters").GetInt32() > test.Limit, "discarded stderr still counted");
+                Check(failure.Summary.GetProperty("termination").GetProperty("host_kill_requested").GetBoolean(), "overflow termination");
+                Check(!failure.Summary.GetRawText().Contains(PrivateText, StringComparison.Ordinal), "discarded stderr privacy");
+            }
+        }
+        try { await Run("kontakt-stderr-failure", stderrMaximum: KontaktStderrMaximum); throw new Exception("Failure was accepted"); }
+        catch (WorkerFailure failure) { Check(failure.Code == "KONTAKT_LOAD_FAILED", "diagnostics do not mask failure"); }
         try { await Run("wait", TimeSpan.FromMilliseconds(300)); throw new Exception("Timeout was accepted"); }
         catch (McpFault fault) { Check(fault.Code == "vst_timeout", "timeout classification"); }
         using (var cancel = new CancellationTokenSource(300))
@@ -59,7 +90,7 @@ internal static class Program
         }
         try { await Run("crash"); throw new Exception("Crash was accepted"); }
         catch (McpFault fault) { Check(fault.Code == "vst_worker_crashed", "crash classification"); }
-        Console.WriteLine("PASS: exact output bounds, stdout/stderr overflow, host termination, privacy, timeout, cancellation and crash");
+        Console.WriteLine("PASS: default/Kontakt output bounds, noisy stderr, typed failures, host termination, privacy, timeout, cancellation and crash");
         return 0;
     }
     private static void Check(bool condition, string message)

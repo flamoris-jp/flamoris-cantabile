@@ -45,7 +45,9 @@ internal sealed class KontaktPreparation(Workspace workspace)
             var result = await WorkerProcess.Run(worker!, ["kontakt-prepare", "--plugin", target.Path, "--class-id", target.ClassId,
                 "--script", request, "--workspace", sandbox, "--output", output, "--max-seconds", "120", "--allow-write",
                 "--dialog-wait-seconds", dialogWaitSeconds.ToString(System.Globalization.CultureInfo.InvariantCulture)],
-                sandbox, TimeSpan.FromSeconds(125), token, 16384);
+                // Kontakt may emit diagnostic text after a successful Lua/state
+                // operation. Drain it without retaining it; keep a hard bound.
+                sandbox, TimeSpan.FromSeconds(125), token, 16384, stderrMaximum: 1024 * 1024);
             if (result.GetProperty("schema_version").GetInt32() != 1 || result.GetProperty("adapter").GetString() != "kontakt_lua_editor" ||
                 result.GetProperty("class_id").GetString() != target.ClassId || result.GetProperty("instrument_count").GetInt32() != 1 ||
                 result.GetProperty("dialog_wait_seconds").GetInt32() != dialogWaitSeconds)

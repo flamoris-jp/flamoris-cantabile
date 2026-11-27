@@ -164,7 +164,9 @@ void Editor::run_lua_dialog() {
         // instrument, optional snapshot, receipt.part, nonce, rename source, destination.
         if (values.size() < 5) throw 1;
         auto instrument=read(fs::u8path(values[0]));
-        bool success=instrument == "original synthetic ready";
+        bool noisy=instrument == "original synthetic noisy stderr";
+        bool success=instrument == "original synthetic ready" || noisy;
+        if (noisy) std::cerr << std::string(32768, 'd') << std::flush;
         std::cerr << "synthetic_instrument_ready=" << success << '\n';
         if (success) controller.loaded();
         auto nonce=values[values.size()-3];
