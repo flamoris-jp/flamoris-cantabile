@@ -16,7 +16,7 @@ internal static class WorkerProcess
         public int Observed { get; } = observed;
     }
     public static async Task<JsonElement> Run(string executable, IEnumerable<string> arguments, string directory,
-        TimeSpan timeout, CancellationToken token, int stdoutMaximum = 4 * 1024 * 1024)
+        TimeSpan timeout, CancellationToken token, int stdoutMaximum = 4 * 1024 * 1024, int stderrMaximum = 16384)
     {
         using var lifetime = CancellationTokenSource.CreateLinkedTokenSource(token);
         lifetime.CancelAfter(timeout);
@@ -27,7 +27,7 @@ internal static class WorkerProcess
         SafeEnvironment(process.StartInfo);
         if (!process.Start()) throw new McpFault("vst_start_failed");
         Task<string> output = Read(process.StandardOutput, "stdout", stdoutMaximum, lifetime.Token);
-        Task<string> errors = Read(process.StandardError, "stderr", 16384, lifetime.Token);
+        Task<string> errors = Read(process.StandardError, "stderr", stderrMaximum, lifetime.Token, keepText: false);
         try
         {
             var pending = new List<Task> { process.WaitForExitAsync(lifetime.Token), output, errors };
@@ -70,12 +70,17 @@ internal static class WorkerProcess
         var safe = info.Environment.Where(p => retained.Contains(p.Key, StringComparer.OrdinalIgnoreCase)).ToArray();
         info.Environment.Clear(); foreach (var entry in safe) info.Environment[entry.Key] = entry.Value;
     }
-    private static async Task<string> Read(StreamReader stream, string name, int maximum, CancellationToken token)
+    private static async Task<string> Read(StreamReader stream, string name, int maximum, CancellationToken token, bool keepText = true)
     {
-        var text = new StringBuilder(); var buffer = new char[4096]; int count;
+        var text = keepText ? new StringBuilder() : null;
+        var buffer = new char[4096]; int count, observed = 0;
         while ((count = await stream.ReadAsync(buffer.AsMemory(), token)) > 0)
-        { if (text.Length + count > maximum) throw new OutputLimit(name, maximum, text.Length + count); text.Append(buffer, 0, count); }
-        return text.ToString();
+        {
+            observed += count;
+            if (observed > maximum) throw new OutputLimit(name, maximum, observed);
+            text?.Append(buffer, 0, count);
+        }
+        return text?.ToString() ?? string.Empty;
     }
 }
 
